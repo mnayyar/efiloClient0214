@@ -1,0 +1,783 @@
+// efilo.ai — Single-tenant Prisma Schema
+// One Organization record per database. No tenant scoping on any model.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  PROJECT_MANAGER
+  FIELD_ENGINEER
+  ESTIMATOR
+  EXECUTIVE
+  VIEWER
+}
+
+enum ProjectType {
+  COMMERCIAL
+  INDUSTRIAL
+  INSTITUTIONAL
+  RESIDENTIAL
+  INFRASTRUCTURE
+}
+
+enum ContractType {
+  LUMP_SUM
+  GMP
+  COST_PLUS
+  UNIT_PRICE
+  TIME_AND_MATERIAL
+}
+
+enum DocumentType {
+  SPEC
+  DRAWING
+  ADDENDUM
+  RFI
+  CONTRACT
+  CHANGE
+  COMPLIANCE
+  MEETING
+  FINANCIAL
+  SCHEDULE
+  CLOSEOUT
+  PORTFOLIO
+}
+
+enum DocumentStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  ERROR
+}
+
+enum RFIStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_GC
+  OPEN
+  ANSWERED
+  CLOSED
+  VOID
+}
+
+enum RFIPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ComplianceNoticeType {
+  NOTICE_TO_PROCEED
+  CHANGE_ORDER_NOTICE
+  DELAY_NOTICE
+  CLAIM_NOTICE
+  CURE_NOTICE
+  TERMINATION_NOTICE
+  LIEN_NOTICE
+  WARRANTY_NOTICE
+}
+
+enum ComplianceNoticeStatus {
+  DRAFT
+  PENDING_REVIEW
+  SENT
+  ACKNOWLEDGED
+  EXPIRED
+  VOID
+}
+
+enum HealthScorePosture {
+  GREEN
+  MONITOR
+  ESCALATE
+  CRITICAL
+}
+
+enum ChangeEventStatus {
+  IDENTIFIED
+  EVALUATING
+  PCO_SUBMITTED
+  COR_APPROVED
+  CO_EXECUTED
+  REJECTED
+  VOID
+}
+
+enum ChangeEventType {
+  SCOPE_CHANGE
+  DESIGN_ERROR
+  UNFORESEEN_CONDITION
+  OWNER_DIRECTIVE
+  SCHEDULE_IMPACT
+  REGULATORY
+}
+
+enum MeetingType {
+  OAC
+  FOREMAN
+  SAFETY
+  COORDINATION
+  PRECONSTRUCTION
+  CLOSEOUT
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  PREP_READY
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TalkingPointPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ActionItemStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum CloseoutCategory {
+  DOCUMENTATION
+  FINANCIAL
+  WARRANTY
+  PUNCHLIST
+  TRAINING
+  SPARE_PARTS
+  REGULATORY
+}
+
+enum CloseoutItemStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum RetentionConditionStatus {
+  PENDING
+  MET
+  WAIVED
+  DISPUTED
+}
+
+enum NotificationType {
+  COMPLIANCE_DEADLINE
+  RFI_RESPONSE_DUE
+  RFI_OVERDUE
+  ACTION_ITEM_DUE
+  HEALTH_SCORE_ALERT
+  CO_POTENTIAL_DETECTED
+  DOCUMENT_PROCESSED
+  MEETING_PREP_READY
+  VERSION_MISMATCH
+  CONFLICT_DETECTED
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SLACK
+}
+
+enum SearchScope {
+  PROJECT
+  CROSS_PROJECT
+}
+
+enum ContractClauseKind {
+  PAYMENT_TERMS
+  CHANGE_ORDER_PROCESS
+  CLAIMS_PROCEDURE
+  DISPUTE_RESOLUTION
+  NOTICE_REQUIREMENTS
+  RETENTION
+  WARRANTY
+  INSURANCE
+  INDEMNIFICATION
+  TERMINATION
+  FORCE_MAJEURE
+  LIQUIDATED_DAMAGES
+  SCHEDULE
+  SAFETY
+  GENERAL_CONDITIONS
+  SUPPLEMENTARY_CONDITIONS
+}
+
+enum ContractClauseMethod {
+  WRITTEN_NOTICE
+  CERTIFIED_MAIL
+  EMAIL
+  HAND_DELIVERY
+  REGISTERED_MAIL
+}
+
+enum DeadlineType {
+  CALENDAR_DAYS
+  BUSINESS_DAYS
+  HOURS
+}
+
+enum AuthMethod {
+  SSO
+  EMAIL_PASSWORD
+}
+
+// ─── Core Models ────────────────────────────────────────────────────────────
+
+model Organization {
+  id           String  @id @default(cuid())
+  name         String
+  slug         String  @unique
+  logo         String?
+  primaryColor String  @default("#C67F17")
+  billingEmail String
+  maxProjects  Int     @default(100)
+  maxUsers     Int     @default(50)
+  workosOrgId  String? @unique
+  ssoEnabled   Boolean @default(false)
+  ssoProvider  String?
+
+  users    User[]
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  name           String
+  role           UserRole      @default(VIEWER)
+  authMethod     AuthMethod    @default(SSO)
+  passwordHash   String?
+  workosUserId   String?       @unique
+  avatar         String?
+  lastLoginAt    DateTime?
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+
+  searchQueries SearchQuery[]
+  chatSessions  ChatSession[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  projectCode    String       @unique
+  name           String
+  type           ProjectType
+  contractType   ContractType?
+  contractValue  Decimal?
+  status         String       @default("active")
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  documents          Document[]
+  rfis               RFI[]
+  contractClauses    ContractClause[]
+  complianceNotices  ComplianceNotice[]
+  complianceScores   ComplianceScore[]
+  healthScores       HealthScore[]
+  wipReports         WIPReport[]
+  earnedValueMetrics EarnedValueMetric[]
+  changeEvents       ChangeEvent[]
+  meetings           Meeting[]
+  actionItems        ActionItem[]
+  closeoutChecklists CloseoutChecklist[]
+  retentionTrackers  RetentionTracker[]
+  searchQueries      SearchQuery[]
+  chatSessions       ChatSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Document & Search Models ───────────────────────────────────────────────
+
+model Document {
+  id           String         @id @default(cuid())
+  projectId    String
+  project      Project        @relation(fields: [projectId], references: [id])
+  name         String
+  type         DocumentType
+  status       DocumentStatus @default(UPLOADING)
+  mimeType     String
+  fileSize     Int
+  r2Key        String
+  pageCount    Int?
+  uploadedById String
+
+  chunks    DocumentChunk[]
+  revisions DocumentRevision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, type])
+  @@index([status])
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  content    String  @db.Text
+  chunkIndex Int
+  pageNumber Int?
+  sectionRef String?
+  metadata   Json?
+
+  // embedding vector(1536) — added via raw SQL migration
+  // pgvector column cannot be defined in Prisma schema directly
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId, chunkIndex])
+  @@index([pageNumber])
+}
+
+model DocumentRevision {
+  id             String   @id @default(cuid())
+  documentId     String
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  revisionNumber Int
+  revisionDate   DateTime
+  uploadedBy     String
+  changeLog      String?  @db.Text
+  diffJson       Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([documentId, revisionNumber])
+  @@index([documentId, revisionDate])
+}
+
+model SearchQuery {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  projectId     String?
+  project       Project?    @relation(fields: [projectId], references: [id])
+  query         String      @db.Text
+  scope         SearchScope @default(PROJECT)
+  documentTypes String[]    @default([])
+  response      String?     @db.Text
+  sources       Json?
+  responseTime  Int?
+  tokenCount    Int?
+  embeddingTime Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+  title     String?
+  messages  Json
+  isArchived Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([projectId, updatedAt])
+}
+
+model SearchAnalytics {
+  id            String      @id @default(cuid())
+  queryId       String?
+  userId        String
+  searchTerm    String
+  scope         SearchScope
+  resultCount   Int
+  clickedResult String?
+  userFeedback  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ─── Capability Models ──────────────────────────────────────────────────────
+
+model ContractClause {
+  id           String              @id @default(cuid())
+  projectId    String
+  project      Project             @relation(fields: [projectId], references: [id])
+  kind         ContractClauseKind
+  title        String
+  content      String              @db.Text
+  sectionRef   String?
+  deadlineDays Int?
+  deadlineType DeadlineType?
+  noticeMethod ContractClauseMethod?
+  aiExtracted  Boolean             @default(true)
+  aiModel      String?
+  sourceDocId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, kind])
+}
+
+model RFI {
+  id             String      @id @default(cuid())
+  projectId      String
+  project        Project     @relation(fields: [projectId], references: [id])
+  rfiNumber      String
+  subject        String
+  question       String      @db.Text
+  status         RFIStatus   @default(DRAFT)
+  priority       RFIPriority @default(MEDIUM)
+  assignedTo     String?
+  dueDate        DateTime?
+  submittedAt    DateTime?
+  respondedAt    DateTime?
+  response       String?     @db.Text
+
+  aiDraftQuestion    String? @db.Text
+  aiDraftModel       String?
+  aiResponseAnalysis String? @db.Text
+  coFlag             Boolean @default(false)
+  coEstimate         Decimal?
+  isOverdue          Boolean @default(false)
+
+  sourceDocIds   String[] @default([])
+  sourceChunkIds String[] @default([])
+
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, rfiNumber])
+  @@index([projectId, status])
+  @@index([isOverdue])
+}
+
+model ComplianceNotice {
+  id             String                 @id @default(cuid())
+  projectId      String
+  project        Project                @relation(fields: [projectId], references: [id])
+  type           ComplianceNoticeType
+  status         ComplianceNoticeStatus @default(DRAFT)
+  title          String
+  content        String                 @db.Text
+  recipientName  String?
+  recipientEmail String?
+  dueDate        DateTime?
+  sentAt         DateTime?
+  acknowledgedAt DateTime?
+  clauseId       String?
+
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, type])
+  @@index([dueDate])
+}
+
+model ComplianceScore {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+  score     Int
+  details   Json
+
+  calculatedAt DateTime @default(now())
+
+  @@index([projectId, calculatedAt])
+}
+
+model HealthScore {
+  id                  String             @id @default(cuid())
+  projectId           String
+  project             Project            @relation(fields: [projectId], references: [id])
+  overallScore        Int
+  posture             HealthScorePosture
+  costScore           Int
+  scheduleScore       Int
+  complianceScore     Int
+  changeExposureScore Int
+  coordinationScore   Int
+  narrative           String?            @db.Text
+  aiModel             String?
+
+  calculatedAt DateTime @default(now())
+
+  @@index([projectId, calculatedAt])
+}
+
+model WIPReport {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id])
+  reportDate      DateTime
+  contractValue   Decimal
+  billedToDate    Decimal
+  costToDate      Decimal
+  percentComplete Decimal
+  projectedCost   Decimal?
+  rawData         Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, reportDate])
+}
+
+model EarnedValueMetric {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  reportDate   DateTime
+  plannedValue Decimal
+  earnedValue  Decimal
+  actualCost   Decimal
+  cpi          Decimal?
+  spi          Decimal?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, reportDate])
+}
+
+model ChangeEvent {
+  id             String            @id @default(cuid())
+  projectId      String
+  project        Project           @relation(fields: [projectId], references: [id])
+  type           ChangeEventType
+  status         ChangeEventStatus @default(IDENTIFIED)
+  title          String
+  description    String            @db.Text
+  estimatedValue Decimal?
+  approvedValue  Decimal?
+  scheduleDays   Int?
+  sourceRfiId    String?
+  sourceDocIds   String[]          @default([])
+
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status])
+  @@index([type])
+}
+
+model Meeting {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id])
+  type        MeetingType
+  status      MeetingStatus @default(SCHEDULED)
+  title       String
+  scheduledAt DateTime
+  attendees   String[]      @default([])
+  agenda      String?       @db.Text
+  minutes     String?       @db.Text
+  aiPrepNotes String?       @db.Text
+
+  talkingPoints TalkingPoint[]
+
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, scheduledAt])
+}
+
+model TalkingPoint {
+  id           String               @id @default(cuid())
+  meetingId    String
+  meeting      Meeting              @relation(fields: [meetingId], references: [id])
+  priority     TalkingPointPriority
+  topic        String
+  context      String?              @db.Text
+  sourceDocIds String[]             @default([])
+  aiGenerated  Boolean              @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+model ActionItem {
+  id          String           @id @default(cuid())
+  projectId   String
+  project     Project          @relation(fields: [projectId], references: [id])
+  title       String
+  description String?          @db.Text
+  status      ActionItemStatus @default(OPEN)
+  assignedTo  String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  meetingId   String?
+
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status])
+  @@index([dueDate])
+}
+
+model CloseoutChecklist {
+  id        String           @id @default(cuid())
+  projectId String
+  project   Project          @relation(fields: [projectId], references: [id])
+  category  CloseoutCategory
+
+  items CloseoutItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, category])
+}
+
+model CloseoutItem {
+  id          String             @id @default(cuid())
+  checklistId String
+  checklist   CloseoutChecklist  @relation(fields: [checklistId], references: [id])
+  title       String
+  description String?
+  status      CloseoutItemStatus @default(NOT_STARTED)
+  assignedTo  String?
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RetentionTracker {
+  id              String  @id @default(cuid())
+  projectId       String
+  project         Project @relation(fields: [projectId], references: [id])
+  retentionAmount Decimal
+  releasedAmount  Decimal @default(0)
+
+  conditions RetentionCondition[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId])
+}
+
+model RetentionCondition {
+  id        String                   @id @default(cuid())
+  trackerId String
+  tracker   RetentionTracker         @relation(fields: [trackerId], references: [id])
+  title     String
+  status    RetentionConditionStatus @default(PENDING)
+  dueDate   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PortfolioSnapshot {
+  id                 String  @id @default(cuid())
+  totalProjects      Int
+  activeProjects     Int
+  totalContractValue Decimal
+  totalExposure      Decimal
+  avgHealthScore     Int
+  details            Json
+
+  snapshotDate DateTime @default(now())
+
+  @@index([snapshotDate])
+}
+
+model IndustryBenchmark {
+  id       String   @id @default(cuid())
+  category String
+  metric   String
+  value    Decimal
+  source   String?
+
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id         String               @id @default(cuid())
+  userId     String
+  user       User                 @relation(fields: [userId], references: [id])
+  type       NotificationType
+  severity   NotificationSeverity
+  channel    NotificationChannel  @default(IN_APP)
+  title      String
+  message    String
+  projectId  String?
+  entityId   String?
+  entityType String?
+  read       Boolean              @default(false)
+  sentAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([projectId])
+}
+
+model AuditLog {
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id])
+  action      String
+  entityType  String
+  entityId    String
+  projectId   String?
+  details     Json?
+  aiGenerated Boolean @default(false)
+  aiModel     String?
+  tokensUsed  Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@index([projectId, createdAt])
+}
