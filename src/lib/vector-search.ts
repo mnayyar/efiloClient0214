@@ -60,7 +60,7 @@ export async function vectorSearch(
     scope,
     documentTypes,
     limit = 20,
-    threshold = 0.65,
+    threshold = 0.35,
     activeProjectId,
   } = options;
 
@@ -143,7 +143,7 @@ function applyScoring(
         : 1.0;
 
     const finalScore = baseScore * typeWeight * recencyBoost * scopeWeight;
-    const isMarginally = baseScore >= 0.65 && baseScore < 0.72;
+    const isMarginally = baseScore >= 0.35 && baseScore < 0.50;
 
     return { ...r, finalScore, isMarginally };
   });

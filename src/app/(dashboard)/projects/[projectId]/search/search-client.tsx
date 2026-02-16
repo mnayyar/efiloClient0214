@@ -49,8 +49,27 @@ export function SearchPageClient({ projectId }: SearchPageClientProps) {
   );
 
   const handleSourceClick = useCallback(
-    (documentId: string) => {
-      window.open(`/projects/${projectId}/documents/${documentId}`, "_blank");
+    async (documentId: string) => {
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/documents/${documentId}/download`
+        );
+        if (!res.ok) return;
+        const { data } = await res.json();
+
+        // PDFs and images open in-browser; everything else downloads
+        const viewableTypes = ["application/pdf", "image/png", "image/jpeg"];
+        if (viewableTypes.includes(data.mimeType)) {
+          window.open(data.downloadUrl, "_blank");
+        } else {
+          const link = document.createElement("a");
+          link.href = data.downloadUrl;
+          link.download = data.name;
+          link.click();
+        }
+      } catch {
+        // silently fail
+      }
     },
     [projectId]
   );
@@ -58,7 +77,7 @@ export function SearchPageClient({ projectId }: SearchPageClientProps) {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* Session sidebar */}
       <div
         className={`hidden transition-all duration-200 md:block ${

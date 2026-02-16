@@ -48,6 +48,10 @@ export function EmptyState({ projectId, onSelectPrompt }: EmptyStateProps) {
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading suggestions...
         </div>
+      ) : data?.documentStats && data.documentStats.length === 0 ? (
+        <p className="mt-8 text-sm text-text-secondary">
+          No documents indexed yet — add them via Project Setup to start searching.
+        </p>
       ) : (
         <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
           {(data?.suggestions ?? []).slice(0, 6).map((suggestion, i) => (

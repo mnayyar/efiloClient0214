@@ -45,7 +45,7 @@ export function DashboardShell({
   const activeProjectId = projectMatch?.[1];
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
         <Sidebar
@@ -70,7 +70,7 @@ export function DashboardShell({
       {/* Main content */}
       <div className="flex flex-1 flex-col">
         <Header onMobileMenuToggle={() => setMobileOpen(true)} />
-        <main className="flex-1 bg-brand-off-white">{children}</main>
+        <main className="flex-1 overflow-y-auto bg-brand-off-white dark:bg-background">{children}</main>
       </div>
     </div>
   );

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { getPresignedUploadUrl, buildR2Key } from "@/lib/r2";
+import { getPresignedUploadUrl, buildR2Key, deleteFromR2 } from "@/lib/r2";
+import { inngest } from "@/lib/inngest";
 import { rateLimitGeneral } from "@/lib/rate-limit";
 
 const uploadSchema = z.object({
@@ -19,6 +20,7 @@ const uploadSchema = z.object({
     "image/jpeg",
   ]),
   fileSize: z.number().int().positive().max(200 * 1024 * 1024), // 200MB max
+  replace: z.boolean().optional(),
 });
 
 // POST — Request presigned upload URL
@@ -42,12 +44,49 @@ export async function POST(
       );
     }
 
-    const { name, type, mimeType, fileSize } = parsed.data;
+    const { name, type, mimeType, fileSize, replace } = parsed.data;
 
     // Verify project exists
     const project = await prisma.project.findUnique({ where: { id: projectId } });
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    // Check for duplicate — same name and already READY or PROCESSING
+    const existing = await prisma.document.findFirst({
+      where: {
+        projectId,
+        name,
+        status: { in: ["READY", "PROCESSING", "UPLOADING"] },
+      },
+      select: { id: true, name: true, status: true, updatedAt: true, r2Key: true },
+    });
+
+    if (existing) {
+      if (replace) {
+        // Delete old document (cascade handles chunks/embeddings)
+        await prisma.document.delete({ where: { id: existing.id } });
+
+        // Clean up old R2 file
+        try {
+          await deleteFromR2(existing.r2Key);
+        } catch (r2Error) {
+          console.error("R2 delete of replaced doc failed, queuing:", r2Error);
+          await inngest.send({
+            name: "document.r2-cleanup",
+            data: { r2Key: existing.r2Key },
+          });
+        }
+      } else {
+        return NextResponse.json(
+          {
+            error: "duplicate",
+            message: `"${name}" already exists in this project.`,
+            existingDocument: existing,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     // Create Document record

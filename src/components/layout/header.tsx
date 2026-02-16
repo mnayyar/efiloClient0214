@@ -16,23 +16,41 @@ interface HeaderProps {
   onMobileMenuToggle?: () => void;
 }
 
+const AGENT_LABELS: Record<string, string> = {
+  search: "Ask about your Project",
+  rfis: "Notices & RFI",
+  compliance: "Compliance Engine",
+  health: "Project Health",
+  changes: "Change Intelligence",
+  meetings: "Meeting & Workflow",
+  "enterprise-agent": "Enterprise Intelligence",
+  closeout: "Closeout & Retention",
+};
+
 function useBreadcrumbs() {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
 
-  const crumbs: { label: string; href: string }[] = [];
+  // Inside a project route: /projects/{id}/{agent} — just show the agent label
+  const projectsIdx = segments.indexOf("projects");
+  if (projectsIdx !== -1 && segments.length > projectsIdx + 2) {
+    const agentSlug = segments[projectsIdx + 2];
+    const label = AGENT_LABELS[agentSlug] || agentSlug.charAt(0).toUpperCase() + agentSlug.slice(1);
+    return [{ label, href: pathname }];
+  }
 
+  // Other pages: simple capitalized segments, skip IDs
+  const crumbs: { label: string; href: string }[] = [];
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const href = "/" + segments.slice(0, i + 1).join("/");
 
-    // Skip dynamic IDs — show them as part of the parent
+    // Skip project IDs
     if (i > 0 && segments[i - 1] === "projects" && segment !== "projects") {
-      crumbs.push({ label: segment.slice(0, 8) + "...", href });
       continue;
     }
 
-    const label = segment.charAt(0).toUpperCase() + segment.slice(1);
+    const label = segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, " ");
     crumbs.push({ label, href });
   }
 
@@ -52,7 +70,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
   }
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border-card px-6">
+    <header className="flex h-14 items-center justify-between border-b border-border-card bg-background px-6">
       <div className="flex items-center gap-2">
         {/* Mobile menu button */}
         {onMobileMenuToggle && (

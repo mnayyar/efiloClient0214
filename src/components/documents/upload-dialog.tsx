@@ -1,15 +1,36 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, X, FileText, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  Upload,
+  X,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  File,
+  Image,
+  Sheet,
+  AlertTriangle,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 const DOCUMENT_TYPES = [
   { value: "SPEC", label: "Specification" },
@@ -26,6 +47,7 @@ const DOCUMENT_TYPES = [
 ] as const;
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_FILES_PER_BATCH = 10;
 const ACCEPTED_TYPES = {
   "application/pdf": [".pdf"],
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
@@ -34,7 +56,49 @@ const ACCEPTED_TYPES = {
   "image/jpeg": [".jpg", ".jpeg"],
 };
 
-type UploadStatus = "idle" | "uploading" | "confirming" | "processing" | "ready" | "error";
+type FileStatus = "pending" | "uploading" | "processing" | "ready" | "error" | "duplicate" | "skipped";
+
+interface QueuedFile {
+  file: File;
+  docType: string;
+  status: FileStatus;
+  progress: number;
+  error?: string;
+  docId?: string;
+}
+
+function getFileIcon(name: string, size: "sm" | "md" = "sm") {
+  const ext = name.split(".").pop()?.toLowerCase();
+  const cls = size === "md" ? "h-5 w-5" : "h-4 w-4";
+  if (ext === "pdf") return <FileText className={cn(cls, "text-red-500")} />;
+  if (ext === "docx") return <File className={cn(cls, "text-blue-500")} />;
+  if (ext === "xlsx") return <Sheet className={cn(cls, "text-green-500")} />;
+  if (["png", "jpg", "jpeg"].includes(ext ?? ""))
+    return <Image className={cn(cls, "text-purple-500")} />;
+  return <FileText className={cn(cls, "text-text-secondary")} />;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function guessDocType(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("spec")) return "SPEC";
+  if (lower.includes("drawing") || lower.includes("dwg")) return "DRAWING";
+  if (lower.includes("addendum")) return "ADDENDUM";
+  if (lower.includes("rfi")) return "RFI";
+  if (lower.includes("contract")) return "CONTRACT";
+  if (lower.includes("change") || lower.includes("co-")) return "CHANGE";
+  if (lower.includes("compliance")) return "COMPLIANCE";
+  if (lower.includes("meeting") || lower.includes("minutes")) return "MEETING";
+  if (lower.includes("financial") || lower.includes("invoice")) return "FINANCIAL";
+  if (lower.includes("schedule")) return "SCHEDULE";
+  if (lower.includes("closeout")) return "CLOSEOUT";
+  return "SPEC";
+}
 
 interface UploadDialogProps {
   projectId: string;
@@ -49,288 +113,430 @@ export function UploadDialog({
   onOpenChange,
   onUploadComplete,
 }: UploadDialogProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [docType, setDocType] = useState<string>("SPEC");
-  const [status, setStatus] = useState<UploadStatus>("idle");
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [docId, setDocId] = useState<string | null>(null);
+  const [queue, setQueue] = useState<QueuedFile[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const abortRef = useRef(false);
 
   const onDrop = useCallback((accepted: File[]) => {
-    if (accepted.length > 0) {
-      setFile(accepted[0]);
-      setError(null);
-      setStatus("idle");
-    }
+    setGlobalError(null);
+
+    setQueue((prev) => {
+      const existingNames = new Set(prev.map((q) => q.file.name));
+      const newFiles = accepted.filter((f) => !existingNames.has(f.name));
+      const total = prev.length + newFiles.length;
+
+      if (total > MAX_FILES_PER_BATCH) {
+        setGlobalError(`Maximum ${MAX_FILES_PER_BATCH} files per upload. You selected ${total}.`);
+        return prev;
+      }
+
+      return [
+        ...prev,
+        ...newFiles.map((file) => ({
+          file,
+          docType: guessDocType(file.name),
+          status: "pending" as FileStatus,
+          progress: 0,
+        })),
+      ];
+    });
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: ACCEPTED_TYPES,
     maxSize: MAX_FILE_SIZE,
-    maxFiles: 1,
+    multiple: true,
+    disabled: isProcessing,
     onDropRejected: (rejections) => {
-      const err = rejections[0]?.errors[0];
-      if (err?.code === "file-too-large") {
-        setError("File exceeds 100MB limit");
-      } else if (err?.code === "file-invalid-type") {
-        setError("Unsupported file type. Use PDF, DOCX, XLSX, PNG, or JPEG.");
-      } else {
-        setError(err?.message ?? "File rejected");
-      }
+      const messages = rejections.map((r) => {
+        const err = r.errors[0];
+        if (err?.code === "file-too-large") return `${r.file.name}: exceeds 100MB`;
+        if (err?.code === "file-invalid-type") return `${r.file.name}: unsupported type`;
+        return `${r.file.name}: ${err?.message ?? "rejected"}`;
+      });
+      setGlobalError(messages.join(". "));
     },
   });
 
-  // Poll for document status after confirming
-  useEffect(() => {
-    if (status !== "processing" || !docId) return;
+  function removeFile(index: number) {
+    setQueue((prev) => prev.filter((_, i) => i !== index));
+  }
 
-    const interval = setInterval(async () => {
+  function updateFileType(index: number, docType: string) {
+    setQueue((prev) =>
+      prev.map((q, i) => (i === index ? { ...q, docType } : q))
+    );
+  }
+
+  function updateQueueItem(index: number, updates: Partial<QueuedFile>) {
+    setQueue((prev) =>
+      prev.map((q, i) => (i === index ? { ...q, ...updates } : q))
+    );
+  }
+
+  async function processQueue() {
+    setIsProcessing(true);
+    abortRef.current = false;
+
+    const pendingIndices = queue
+      .map((q, i) => ({ q, i }))
+      .filter(({ q }) => q.status === "pending")
+      .map(({ i }) => i);
+
+    for (const idx of pendingIndices) {
+      if (abortRef.current) break;
+
+      const item = queue[idx];
       try {
-        const res = await fetch(
-          `/api/projects/${projectId}/documents/${docId}`
+        // Step 1: Request presigned URL (also checks for duplicates)
+        updateQueueItem(idx, { status: "uploading", progress: 0 });
+
+        let presignRes = await fetch(
+          `/api/projects/${projectId}/documents`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: item.file.name,
+              type: item.docType,
+              mimeType: item.file.type,
+              fileSize: item.file.size,
+            }),
+          }
         );
-        const data = await res.json();
-        if (data.data?.status === "READY") {
-          setStatus("ready");
-          clearInterval(interval);
-          onUploadComplete?.();
-        } else if (data.data?.status === "ERROR") {
-          setStatus("error");
-          setError("Document processing failed");
-          clearInterval(interval);
+
+        // If duplicate found, auto-replace (delete old + upload new version)
+        if (!presignRes.ok) {
+          const errData = await presignRes.json();
+          if (errData.error === "duplicate") {
+            updateQueueItem(idx, { status: "uploading", progress: 0 });
+            presignRes = await fetch(
+              `/api/projects/${projectId}/documents`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  name: item.file.name,
+                  type: item.docType,
+                  mimeType: item.file.type,
+                  fileSize: item.file.size,
+                  replace: true,
+                }),
+              }
+            );
+            if (!presignRes.ok) {
+              const retryErr = await presignRes.json();
+              throw new Error(retryErr.error || "Failed to replace document");
+            }
+          } else {
+            throw new Error(errData.error || "Failed to prepare upload");
+          }
         }
-      } catch {
-        // Ignore polling errors
-      }
-    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [status, docId, projectId, onUploadComplete]);
+        const { data } = await presignRes.json();
+        updateQueueItem(idx, { docId: data.documentId });
 
-  async function handleUpload() {
-    if (!file) return;
+        // Step 2: Upload to R2
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) {
+              updateQueueItem(idx, {
+                progress: Math.round((e.loaded / e.total) * 100),
+              });
+            }
+          });
+          xhr.open("PUT", data.uploadUrl);
+          xhr.setRequestHeader("Content-Type", item.file.type);
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`Upload failed: ${xhr.status}`));
+          };
+          xhr.onerror = () => reject(new Error("Network error during upload"));
+          xhr.send(item.file);
+        });
 
-    try {
-      setStatus("uploading");
-      setProgress(0);
+        // Step 3: Confirm → triggers ingestion pipeline
+        updateQueueItem(idx, { status: "processing", progress: 100 });
 
-      // 1. Get presigned upload URL
-      const presignRes = await fetch(
-        `/api/projects/${projectId}/documents`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: file.name,
-            type: docType,
-            mimeType: file.type,
-            size: file.size,
-          }),
+        const confirmRes = await fetch(
+          `/api/projects/${projectId}/documents/${data.documentId}/confirm`,
+          { method: "POST" }
+        );
+
+        if (!confirmRes.ok) {
+          throw new Error("Failed to confirm upload");
         }
-      );
 
-      if (!presignRes.ok) {
-        throw new Error("Failed to get upload URL");
+        // Mark as ready (pipeline runs async via Inngest)
+        updateQueueItem(idx, { status: "ready" });
+      } catch (err) {
+        updateQueueItem(idx, {
+          status: "error",
+          error: err instanceof Error ? err.message : "Upload failed",
+        });
       }
-
-      const { data } = await presignRes.json();
-      setDocId(data.documentId);
-
-      // 2. Upload file directly to R2
-      const xhr = new XMLHttpRequest();
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) {
-          setProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        xhr.open("PUT", data.uploadUrl);
-        xhr.setRequestHeader("Content-Type", file.type);
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed: ${xhr.status}`));
-        };
-        xhr.onerror = () => reject(new Error("Upload failed"));
-        xhr.send(file);
-      });
-
-      // 3. Confirm upload
-      setStatus("confirming");
-      const confirmRes = await fetch(
-        `/api/projects/${projectId}/documents/${data.documentId}/confirm`,
-        { method: "POST" }
-      );
-
-      if (!confirmRes.ok) {
-        throw new Error("Failed to confirm upload");
-      }
-
-      setStatus("processing");
-    } catch (err) {
-      setStatus("error");
-      setError(err instanceof Error ? err.message : "Upload failed");
     }
+
+    setIsProcessing(false);
+    onUploadComplete?.();
   }
 
   function handleReset() {
-    setFile(null);
-    setDocType("SPEC");
-    setStatus("idle");
-    setProgress(0);
-    setError(null);
-    setDocId(null);
+    setQueue([]);
+    setIsProcessing(false);
+    setGlobalError(null);
+    abortRef.current = false;
   }
 
   function handleClose() {
-    if (status === "uploading" || status === "confirming") return;
+    if (isProcessing) return;
     handleReset();
     onOpenChange(false);
   }
 
+  const pendingCount = queue.filter((q) => q.status === "pending").length;
+  const completedCount = queue.filter((q) => q.status === "ready").length;
+  const errorCount = queue.filter((q) => q.status === "error").length;
+  const dupCount = queue.filter((q) => q.status === "duplicate").length;
+  const allDone = queue.length > 0 && pendingCount === 0 && !isProcessing;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Upload Document</DialogTitle>
+          <DialogTitle>Upload Documents</DialogTitle>
+          <DialogDescription>
+            Upload up to {MAX_FILES_PER_BATCH} files at once. Files are processed sequentially through the AI ingestion pipeline. Duplicates are automatically detected.
+          </DialogDescription>
         </DialogHeader>
 
-        {status === "ready" ? (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <CheckCircle2 className="h-12 w-12 text-status-success" />
-            <p className="font-medium text-text-primary">
-              Document processed successfully
-            </p>
-            <p className="text-sm text-text-secondary">
-              {file?.name} is ready for search
-            </p>
-            <Button onClick={handleClose} className="mt-2">
-              Done
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Dropzone */}
-            {!file ? (
-              <div
-                {...getRootProps()}
-                className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 transition-colors ${
-                  isDragActive
-                    ? "border-brand-orange bg-brand-orange/5"
-                    : "border-border-card hover:border-brand-orange/50"
-                }`}
-              >
-                <input {...getInputProps()} />
-                <Upload className="h-8 w-8 text-text-secondary" />
-                <p className="text-sm font-medium text-text-primary">
-                  Drop file here or click to browse
+        <div className="space-y-4">
+          {/* ── Dropzone ─────────────────────────────────── */}
+          {!isProcessing && !allDone && (
+            <div
+              {...getRootProps()}
+              className={cn(
+                "flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed p-8 transition-all",
+                isDragActive
+                  ? "border-brand-orange bg-brand-orange/5 scale-[1.01]"
+                  : "border-border-card hover:border-brand-orange/50 hover:bg-brand-off-white dark:hover:bg-muted/50"
+              )}
+            >
+              <input {...getInputProps()} />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-brand-orange/20 to-brand-orange/5">
+                <Upload className="h-5 w-5 text-brand-orange" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-text-primary">
+                  {isDragActive
+                    ? "Drop files here"
+                    : queue.length > 0
+                      ? "Add more files"
+                      : "Drag & drop documents"}
                 </p>
-                <p className="text-xs text-text-secondary">
-                  PDF, DOCX, XLSX, PNG, JPEG — up to 100MB
+                <p className="mt-1 text-xs text-text-secondary">
+                  or <span className="font-medium text-brand-orange">browse files</span> — PDF, DOCX, XLSX, PNG, JPEG up to 100MB each
                 </p>
               </div>
-            ) : (
-              <div className="flex items-center gap-3 rounded-lg border border-border-card p-3">
-                <FileText className="h-8 w-8 shrink-0 text-text-secondary" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-text-primary">
-                    {file.name}
-                  </p>
-                  <p className="text-xs text-text-secondary">
-                    {(file.size / 1024 / 1024).toFixed(1)} MB
-                  </p>
+            </div>
+          )}
+
+          {/* ── Global error ──────────────────────────────── */}
+          {globalError && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <p className="text-xs text-amber-700 dark:text-amber-300">{globalError}</p>
+            </div>
+          )}
+
+          {/* ── File queue ────────────────────────────────── */}
+          {queue.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-text-primary">
+                    {queue.length} {queue.length === 1 ? "file" : "files"}
+                  </span>
+                  {allDone && (
+                    <div className="flex gap-1.5">
+                      {completedCount > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-950/50 dark:text-green-300">
+                          <CheckCircle2 className="h-3 w-3" /> {completedCount} uploaded
+                        </span>
+                      )}
+                      {dupCount > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                          <AlertTriangle className="h-3 w-3" /> {dupCount} duplicate{dupCount > 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {errorCount > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                          <AlertCircle className="h-3 w-3" /> {errorCount} failed
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {status === "idle" && (
+                {!isProcessing && !allDone && queue.length > 1 && (
                   <button
-                    onClick={() => setFile(null)}
-                    className="rounded p-1 text-text-secondary hover:text-text-primary"
+                    onClick={() => setQueue([])}
+                    className="text-xs text-text-secondary hover:text-text-primary"
                   >
-                    <X className="h-4 w-4" />
+                    Clear all
                   </button>
                 )}
               </div>
-            )}
 
-            {/* Document type selector */}
-            {file && status === "idle" && (
-              <div>
-                <label className="mb-1 block text-sm font-medium text-text-primary">
-                  Document Type
-                </label>
-                <select
-                  value={docType}
-                  onChange={(e) => setDocType(e.target.value)}
-                  className="w-full rounded-md border border-border-card bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange"
-                >
-                  {DOCUMENT_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+              <div className="max-h-[320px] overflow-y-auto rounded-lg border border-border-card divide-y divide-border-card">
+                {queue.map((item, idx) => (
+                  <div
+                    key={`${item.file.name}-${idx}`}
+                    className="flex items-center gap-3 px-3 py-2.5"
+                  >
+                    {/* File icon */}
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border-card bg-card">
+                      {getFileIcon(item.file.name, "md")}
+                    </div>
+
+                    {/* File info */}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-text-primary">
+                        {item.file.name}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-text-secondary">
+                          {formatFileSize(item.file.size)}
+                        </span>
+
+                        {/* Status indicators */}
+                        {item.status === "pending" && !isProcessing && (
+                          <Select
+                            value={item.docType}
+                            onValueChange={(v) => updateFileType(idx, v)}
+                          >
+                            <SelectTrigger className="h-5 w-[100px] border-0 bg-transparent px-1 text-[10px] text-text-secondary shadow-none">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {DOCUMENT_TYPES.map((t) => (
+                                <SelectItem key={t.value} value={t.value}>
+                                  {t.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        {item.status === "pending" && isProcessing && (
+                          <span className="text-[10px] text-text-secondary">Queued</span>
+                        )}
+                        {item.status === "uploading" && (
+                          <span className="text-[10px] font-medium text-brand-orange">
+                            Uploading {item.progress}%
+                          </span>
+                        )}
+                        {item.status === "processing" && (
+                          <span className="flex items-center gap-1 text-[10px] font-medium text-amber-600">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Processing
+                          </span>
+                        )}
+                        {item.status === "ready" && (
+                          <span className="flex items-center gap-1 text-[10px] font-medium text-green-600">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Uploaded & queued for indexing
+                          </span>
+                        )}
+                        {item.status === "duplicate" && (
+                          <span className="flex items-center gap-1 text-[10px] font-medium text-amber-600">
+                            <AlertTriangle className="h-3 w-3" />
+                            Already exists — skipped
+                          </span>
+                        )}
+                        {item.status === "error" && (
+                          <span className="flex items-center gap-1 text-[10px] font-medium text-red-500">
+                            <AlertCircle className="h-3 w-3" />
+                            {item.error || "Failed"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Upload progress bar */}
+                      {item.status === "uploading" && (
+                        <div className="mt-1 h-1 overflow-hidden rounded-full bg-border-card">
+                          <div
+                            className="h-full rounded-full bg-brand-orange transition-all duration-300"
+                            style={{ width: `${item.progress}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Remove button */}
+                    {item.status === "pending" && !isProcessing && (
+                      <button
+                        onClick={() => removeFile(idx)}
+                        className="rounded-md p-1 text-text-secondary transition-colors hover:bg-border-card hover:text-text-primary"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Progress bar */}
-            {(status === "uploading" || status === "confirming" || status === "processing") && (
-              <div>
-                <div className="mb-1 flex justify-between text-xs text-text-secondary">
-                  <span>
-                    {status === "uploading"
-                      ? "Uploading..."
-                      : status === "confirming"
-                        ? "Confirming..."
-                        : "Processing document..."}
-                  </span>
-                  {status === "uploading" && <span>{progress}%</span>}
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-border-card">
-                  {status === "uploading" ? (
-                    <div
-                      className="h-full rounded-full bg-brand-orange transition-all"
-                      style={{ width: `${progress}%` }}
-                    />
-                  ) : (
-                    <div className="h-full w-full animate-pulse rounded-full bg-brand-orange/60" />
-                  )}
-                </div>
-                {status === "processing" && (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-text-secondary">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Extracting text and generating embeddings...
-                  </p>
-                )}
-              </div>
-            )}
+          {/* ── Pipeline info ─────────────────────────────── */}
+          {isProcessing && (
+            <div className="rounded-lg border border-border-card bg-brand-off-white p-3 dark:bg-muted">
+              <p className="text-[11px] text-text-secondary">
+                Files are uploaded sequentially to avoid overloading the ingestion pipeline.
+                Each file goes through: secure upload → text extraction → chunking → embedding generation → vector indexing.
+              </p>
+            </div>
+          )}
 
-            {/* Error */}
-            {error && (
-              <div className="flex items-center gap-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                {error}
-              </div>
-            )}
-
-            {/* Actions */}
-            {status === "idle" && file && (
-              <div className="flex justify-end gap-2">
+          {/* ── Actions ───────────────────────────────────── */}
+          <div className="flex justify-end gap-2 pt-1">
+            {allDone ? (
+              <>
                 <Button variant="outline" onClick={handleReset}>
+                  Upload More
+                </Button>
+                <Button onClick={handleClose}>Done</Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={handleClose}
+                  disabled={isProcessing}
+                >
                   Cancel
                 </Button>
-                <Button onClick={handleUpload}>Upload</Button>
-              </div>
-            )}
-
-            {status === "error" && (
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={handleReset}>
-                  Try Again
+                <Button
+                  onClick={processQueue}
+                  disabled={pendingCount === 0 || isProcessing}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      Processing {queue.length - pendingCount} of {queue.length}...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-1.5 h-4 w-4" />
+                      Upload {pendingCount} {pendingCount === 1 ? "File" : "Files"}
+                    </>
+                  )}
                 </Button>
-              </div>
+              </>
             )}
           </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   );

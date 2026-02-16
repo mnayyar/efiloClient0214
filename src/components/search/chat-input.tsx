@@ -49,7 +49,7 @@ export function ChatInput({ onSend, isLoading, initialValue }: ChatInputProps) {
   }
 
   return (
-    <div className="border-t border-border-card bg-white px-4 py-3">
+    <div className="border-t border-border-card bg-card px-4 py-3">
       <div className="mx-auto max-w-3xl">
         {/* Scope toggle */}
         <div className="mb-2 flex items-center gap-1">

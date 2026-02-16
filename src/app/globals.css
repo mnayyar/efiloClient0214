@@ -46,28 +46,38 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  /* efilo brand colors */
-  --color-brand-orange: #C67F17;
-  --color-brand-off-white: #FAFAF8;
+  /* efilo brand colors (dark-mode-aware via CSS vars) */
+  --color-brand-orange: var(--efilo-brand-orange);
+  --color-brand-off-white: var(--efilo-off-white);
 
   /* efilo text colors */
-  --color-text-primary: #1C1917;
-  --color-text-secondary: #57534E;
+  --color-text-primary: var(--efilo-text-primary);
+  --color-text-secondary: var(--efilo-text-secondary);
 
   /* efilo border colors */
-  --color-border-card: #E8E5DE;
+  --color-border-card: var(--efilo-border-card);
 
   /* efilo status colors */
-  --color-status-success: #0F8A5F;
-  --color-status-warning: #C67F17;
-  --color-status-critical: #DC2626;
-  --color-status-info: #2563EB;
+  --color-status-success: var(--efilo-status-success);
+  --color-status-warning: var(--efilo-brand-orange);
+  --color-status-critical: var(--efilo-status-critical);
+  --color-status-info: var(--efilo-status-info);
 }
 
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
+
+  /* efilo brand tokens — light */
+  --efilo-brand-orange: #C67F17;
+  --efilo-off-white: #FAFAF8;
+  --efilo-text-primary: #1C1917;
+  --efilo-text-secondary: #57534E;
+  --efilo-border-card: #E8E5DE;
+  --efilo-status-success: #0F8A5F;
+  --efilo-status-critical: #DC2626;
+  --efilo-status-info: #2563EB;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -102,6 +112,16 @@
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
+
+  /* efilo brand tokens — dark */
+  --efilo-brand-orange: #D4941F;
+  --efilo-off-white: #0C0A09;
+  --efilo-text-primary: #E7E5E4;
+  --efilo-text-secondary: #A8A29E;
+  --efilo-border-card: #292524;
+  --efilo-status-success: #34D399;
+  --efilo-status-critical: #F87171;
+  --efilo-status-info: #60A5FA;
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);

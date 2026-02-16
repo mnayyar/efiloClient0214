@@ -1,4 +1,6 @@
-import { PDFParse } from "pdf-parse";
+// pdf-parse v1 tries to load a test file on import — this dynamic import avoids that
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require("pdf-parse/lib/pdf-parse") as typeof import("pdf-parse")["default"];
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 
@@ -43,18 +45,12 @@ export async function extractText(
 }
 
 async function extractFromPdf(buffer: Buffer): Promise<ExtractionResult> {
-  const pdf = new PDFParse({ data: new Uint8Array(buffer) });
-  try {
-    const info = await pdf.getInfo();
-    const textResult = await pdf.getText();
-    const text = textResult.text;
-    const pageCount = info.pages?.length ?? textResult.pages?.length ?? 1;
-    // If extracted text is very short relative to page count, it's likely scanned
-    const isScanned = !text.trim() || text.trim().length < 100;
-    return { text, pageCount, isScanned };
-  } finally {
-    await pdf.destroy();
-  }
+  const result = await pdfParse(buffer);
+  const text = result.text;
+  const pageCount = result.numpages ?? 1;
+  // If extracted text is very short relative to page count, it's likely scanned
+  const isScanned = !text.trim() || text.trim().length < 100;
+  return { text, pageCount, isScanned };
 }
 
 async function extractFromDocx(buffer: Buffer): Promise<ExtractionResult> {

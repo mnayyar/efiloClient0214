@@ -1,8 +1,11 @@
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
+const isDev = process.env.ENVIRONMENT === "development";
+
 /**
  * In-memory rate limiter.
  * Returns true if the request is allowed, false if rate-limited.
+ * Disabled in development to avoid blocking during active dev/testing.
  *
  * Default: 100 requests per hour.
  * Search/chat: 10 requests per minute.
@@ -12,6 +15,7 @@ export function rateLimit(
   limit = 100,
   windowMs = 3600000
 ): boolean {
+  if (isDev) return true;
   const now = Date.now();
   const key = `${userId}:${limit}:${windowMs}`;
   const entry = rateLimitMap.get(key);
@@ -27,12 +31,12 @@ export function rateLimit(
   return true;
 }
 
-/** Rate limit for general API calls: 100/hour */
+/** Rate limit for general API calls: 1,000/hour */
 export function rateLimitGeneral(userId: string): boolean {
-  return rateLimit(userId, 100, 3600000);
+  return rateLimit(userId, 1000, 3600000);
 }
 
-/** Rate limit for search/chat: 10/minute */
+/** Rate limit for search/chat (AI calls): 30/minute */
 export function rateLimitSearch(userId: string): boolean {
-  return rateLimit(userId, 10, 60000);
+  return rateLimit(userId, 30, 60000);
 }

@@ -133,7 +133,7 @@ export default function SettingsPage() {
       {loading ? (
         <div className="py-12 text-center text-text-secondary">Loading users...</div>
       ) : (
-        <div className="rounded-lg border border-card-border bg-white">
+        <div className="rounded-lg border border-card-border bg-card">
           <Table>
             <TableHeader>
               <TableRow>

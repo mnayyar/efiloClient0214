@@ -97,7 +97,7 @@ function LoginContent() {
               setLoginError("");
             }}
             required
-            className="h-11 w-full rounded-lg border border-card-border bg-white px-4 text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange"
+            className="h-11 w-full rounded-lg border border-card-border bg-card px-4 text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange"
           />
           <input
             type="password"
@@ -108,12 +108,12 @@ function LoginContent() {
               setLoginError("");
             }}
             required
-            className="h-11 w-full rounded-lg border border-card-border bg-white px-4 text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange"
+            className="h-11 w-full rounded-lg border border-card-border bg-card px-4 text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange"
           />
           <button
             type="submit"
             disabled={loading}
-            className="flex h-11 w-full items-center justify-center rounded-lg border border-card-border bg-white font-medium text-text-primary transition-colors hover:bg-gray-50 disabled:opacity-50"
+            className="flex h-11 w-full items-center justify-center rounded-lg border border-card-border bg-card font-medium text-text-primary transition-colors hover:bg-muted disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in with Email"}
           </button>

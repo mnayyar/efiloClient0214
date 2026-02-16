@@ -48,7 +48,7 @@ export async function GET(
         data: {
           suggestions: [
             {
-              text: "Upload documents to get started with AI search",
+              text: "No documents indexed yet — add them via Project Setup",
               category: "general",
             },
           ],

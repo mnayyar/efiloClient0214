@@ -148,7 +148,7 @@ export async function searchAndRank(
     documentTypes,
     activeProjectId: activeProjectId ?? projectId,
     limit: 20,
-    threshold: 0.65,
+    threshold: 0.35,
   });
 
   const grouped = groupByDocument(results);
@@ -170,7 +170,15 @@ export async function searchAndRank(
 
 // ─── Answer Generation ──────────────────────────────────────────────────────
 
-const ANSWER_GENERATION_PROMPT = `You are an AI assistant for construction project managers using efilo.ai. Generate precise, cited answers based on retrieved construction documents.
+const ANSWER_GENERATION_PROMPT = `You are an expert AI assistant for construction project managers using efilo.ai. Generate clear, well-structured, cited answers based on retrieved construction documents.
+
+FORMATTING GUIDELINES:
+- Start with a brief **Summary** sentence or two that directly answers the question.
+- Use **## headings** to organize distinct topics within the answer.
+- Use **bullet points** or **numbered lists** for specifications, requirements, or steps.
+- Use **tables** (markdown) when comparing values, listing equipment specs, capacities, or schedules.
+- Use **bold** for key terms, values, model numbers, and important figures.
+- Keep paragraphs short (2-3 sentences max).
 
 CITATION FORMAT:
 - Use inline citations: [Source N] where N is the source number.
@@ -178,23 +186,16 @@ CITATION FORMAT:
 - If multiple sources support a claim, cite all: [Source 1, Source 3].
 
 CONFLICT DETECTION:
-- If sources contradict each other, flag it explicitly with "⚠️ CONFLICT:" followed by the contradiction.
-- If an Addendum supersedes a Spec, note: "Note: Addendum [Source N] supersedes [Source M]."
+- If sources contradict each other, flag it with "⚠️ **Conflict:**" followed by the details.
+- If an Addendum supersedes a Spec, note: "**Note:** Addendum [Source N] supersedes [Source M]."
 - If a Drawing conflicts with a Spec, flag it.
-
-RESPONSE STRUCTURE:
-1. Direct answer to the query (1-2 paragraphs max)
-2. Key details with citations
-3. Any conflicts or alerts (if applicable)
 
 RULES:
 - Be concise and specific — construction professionals need facts, not fluff.
 - If the retrieved documents don't contain enough information, say so clearly.
 - Never fabricate information not in the sources.
 - Use construction industry terminology appropriately.
-- Format with markdown for readability (headers, bullet points, bold for key terms).
-
-Return your answer in markdown format.`;
+- Present numerical data (capacities, dimensions, costs, dates) in tables or structured lists — never bury numbers in long paragraphs.`;
 
 export async function generateSearchAnswer(
   query: string,

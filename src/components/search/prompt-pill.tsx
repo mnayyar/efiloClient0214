@@ -38,7 +38,7 @@ export function PromptPill({ prompt, onClick }: PromptPillProps) {
   return (
     <button
       onClick={() => onClick(prompt.text)}
-      className="inline-flex items-center gap-1.5 rounded-full border border-border-card bg-white px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand-orange hover:text-brand-orange"
+      className="inline-flex items-center gap-1.5 rounded-full border border-border-card bg-card px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand-orange hover:text-brand-orange"
     >
       <Icon className="h-3 w-3 shrink-0" />
       <span className="max-w-[250px] truncate">{prompt.text}</span>

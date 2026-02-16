@@ -6,5 +6,9 @@ export default async function SearchPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  return <SearchPageClient projectId={projectId} />;
+  return (
+    <div className="h-full">
+      <SearchPageClient projectId={projectId} />
+    </div>
+  );
 }
