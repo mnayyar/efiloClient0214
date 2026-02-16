@@ -22,6 +22,19 @@ const updateProjectSchema = z.object({
     .nullish(),
   contractValue: z.number().positive().nullish(),
   status: z.string().min(1).max(50).optional(),
+  gcCompanyName: z.string().max(255).nullish(),
+  gcContactName: z.string().max(255).nullish(),
+  gcContactEmail: z.string().email().max(255).nullish(),
+  gcContactPhone: z.string().max(50).nullish(),
+  architectName: z.string().max(255).nullish(),
+  architectEmail: z.string().email().max(255).nullish(),
+  architectPhone: z.string().max(50).nullish(),
+  engineerName: z.string().max(255).nullish(),
+  engineerEmail: z.string().email().max(255).nullish(),
+  engineerPhone: z.string().max(50).nullish(),
+  ownerName: z.string().max(255).nullish(),
+  ownerEmail: z.string().email().max(255).nullish(),
+  ownerPhone: z.string().max(50).nullish(),
 });
 
 // PATCH /api/projects/[projectId] — Update project
@@ -70,6 +83,16 @@ export async function PATCH(
     if (parsed.data.contractValue !== undefined)
       data.contractValue = parsed.data.contractValue;
     if (parsed.data.status !== undefined) data.status = parsed.data.status;
+    // Contact fields — pass through if present
+    const contactFields = [
+      "gcCompanyName", "gcContactName", "gcContactEmail", "gcContactPhone",
+      "architectName", "architectEmail", "architectPhone",
+      "engineerName", "engineerEmail", "engineerPhone",
+      "ownerName", "ownerEmail", "ownerPhone",
+    ] as const;
+    for (const field of contactFields) {
+      if (parsed.data[field] !== undefined) data[field] = parsed.data[field];
+    }
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ data: existing });

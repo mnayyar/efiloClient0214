@@ -256,6 +256,13 @@ model Organization {
   logo         String?
   primaryColor String  @default("#C67F17")
   billingEmail String
+  street       String?
+  street2      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  country      String  @default("US")
+  replyToDomain String?
   maxProjects  Int     @default(100)
   maxUsers     Int     @default(50)
   workosOrgId  String? @unique
@@ -278,6 +285,7 @@ model User {
   passwordHash   String?
   workosUserId   String?       @unique
   avatar         String?
+  phone          String?
   lastLoginAt    DateTime?
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id])
@@ -301,6 +309,24 @@ model Project {
   status         String       @default("active")
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
+
+  // Project contacts
+  gcCompanyName  String?
+  gcContactName  String?
+  gcContactEmail String?
+  gcContactPhone String?
+
+  architectName  String?
+  architectEmail String?
+  architectPhone String?
+
+  engineerName   String?
+  engineerEmail  String?
+  engineerPhone  String?
+
+  ownerName      String?
+  ownerEmail     String?
+  ownerPhone     String?
 
   documents          Document[]
   rfis               RFI[]

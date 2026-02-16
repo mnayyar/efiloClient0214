@@ -39,9 +39,98 @@ interface Project {
   contractType: string | null;
   contractValue: string | null;
   status: string;
+  gcCompanyName: string | null;
+  gcContactName: string | null;
+  gcContactEmail: string | null;
+  gcContactPhone: string | null;
+  architectName: string | null;
+  architectEmail: string | null;
+  architectPhone: string | null;
+  engineerName: string | null;
+  engineerEmail: string | null;
+  engineerPhone: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  ownerPhone: string | null;
   createdAt: string;
   updatedAt: string;
   _count: { documents: number; rfis: number };
+}
+
+interface ContactState {
+  name: string;
+  email: string;
+  phone: string;
+}
+
+const EMPTY_CONTACT: ContactState = { name: "", email: "", phone: "" };
+
+function ContactFields({
+  label,
+  prefix,
+  contact,
+  onChange,
+  showCompany,
+  companyName,
+  onCompanyChange,
+}: {
+  label: string;
+  prefix: string;
+  contact: ContactState;
+  onChange: (c: ContactState) => void;
+  showCompany?: boolean;
+  companyName?: string;
+  onCompanyChange?: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+        {label}
+      </p>
+      {showCompany && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${prefix}-company`}>Company Name</Label>
+          <Input
+            id={`${prefix}-company`}
+            value={companyName ?? ""}
+            onChange={(e) => onCompanyChange?.(e.target.value)}
+            placeholder="Company name"
+          />
+        </div>
+      )}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`${prefix}-name`}>Contact Name</Label>
+        <Input
+          id={`${prefix}-name`}
+          value={contact.name}
+          onChange={(e) => onChange({ ...contact, name: e.target.value })}
+          placeholder="Full name"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${prefix}-email`}>Email</Label>
+          <Input
+            id={`${prefix}-email`}
+            type="email"
+            value={contact.email}
+            onChange={(e) => onChange({ ...contact, email: e.target.value })}
+            placeholder="email@example.com"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${prefix}-phone`}>Phone</Label>
+          <Input
+            id={`${prefix}-phone`}
+            type="tel"
+            value={contact.phone}
+            onChange={(e) => onChange({ ...contact, phone: e.target.value })}
+            placeholder="(555) 123-4567"
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const PROJECT_TYPES = [
@@ -292,6 +381,11 @@ function AddProjectDialog({
   const [type, setType] = useState<string>("COMMERCIAL");
   const [contractType, setContractType] = useState<string>("");
   const [contractValue, setContractValue] = useState("");
+  const [gcCompanyName, setGcCompanyName] = useState("");
+  const [gcContact, setGcContact] = useState<ContactState>({ ...EMPTY_CONTACT });
+  const [architect, setArchitect] = useState<ContactState>({ ...EMPTY_CONTACT });
+  const [engineer, setEngineer] = useState<ContactState>({ ...EMPTY_CONTACT });
+  const [owner, setOwner] = useState<ContactState>({ ...EMPTY_CONTACT });
   const [saving, setSaving] = useState(false);
 
   function reset() {
@@ -300,6 +394,11 @@ function AddProjectDialog({
     setType("COMMERCIAL");
     setContractType("");
     setContractValue("");
+    setGcCompanyName("");
+    setGcContact({ ...EMPTY_CONTACT });
+    setArchitect({ ...EMPTY_CONTACT });
+    setEngineer({ ...EMPTY_CONTACT });
+    setOwner({ ...EMPTY_CONTACT });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -323,6 +422,20 @@ function AddProjectDialog({
           body.contractValue = parsed;
         }
       }
+
+      if (gcCompanyName.trim()) body.gcCompanyName = gcCompanyName.trim();
+      if (gcContact.name.trim()) body.gcContactName = gcContact.name.trim();
+      if (gcContact.email.trim()) body.gcContactEmail = gcContact.email.trim();
+      if (gcContact.phone.trim()) body.gcContactPhone = gcContact.phone.trim();
+      if (architect.name.trim()) body.architectName = architect.name.trim();
+      if (architect.email.trim()) body.architectEmail = architect.email.trim();
+      if (architect.phone.trim()) body.architectPhone = architect.phone.trim();
+      if (engineer.name.trim()) body.engineerName = engineer.name.trim();
+      if (engineer.email.trim()) body.engineerEmail = engineer.email.trim();
+      if (engineer.phone.trim()) body.engineerPhone = engineer.phone.trim();
+      if (owner.name.trim()) body.ownerName = owner.name.trim();
+      if (owner.email.trim()) body.ownerEmail = owner.email.trim();
+      if (owner.phone.trim()) body.ownerPhone = owner.phone.trim();
 
       const res = await fetch("/api/projects", {
         method: "POST",
@@ -357,7 +470,7 @@ function AddProjectDialog({
         }
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Project</DialogTitle>
           <DialogDescription>
@@ -426,6 +539,43 @@ function AddProjectDialog({
               inputMode="decimal"
             />
           </div>
+
+          {/* Project Contacts section */}
+          <div className="border-t border-border-card pt-4">
+            <p className="mb-4 text-sm font-medium text-text-primary">
+              Project Contacts (optional)
+            </p>
+            <div className="flex flex-col gap-5">
+              <ContactFields
+                label="General Contractor"
+                prefix="add-gc"
+                contact={gcContact}
+                onChange={setGcContact}
+                showCompany
+                companyName={gcCompanyName}
+                onCompanyChange={setGcCompanyName}
+              />
+              <ContactFields
+                label="Architect"
+                prefix="add-arch"
+                contact={architect}
+                onChange={setArchitect}
+              />
+              <ContactFields
+                label="Engineer"
+                prefix="add-eng"
+                contact={engineer}
+                onChange={setEngineer}
+              />
+              <ContactFields
+                label="Owner"
+                prefix="add-owner"
+                contact={owner}
+                onChange={setOwner}
+              />
+            </div>
+          </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
@@ -461,6 +611,27 @@ function EditProjectDialog({
     project.contractValue ? String(project.contractValue) : ""
   );
   const [status, setStatus] = useState(project.status);
+  const [gcCompanyName, setGcCompanyName] = useState(project.gcCompanyName ?? "");
+  const [gcContact, setGcContact] = useState<ContactState>({
+    name: project.gcContactName ?? "",
+    email: project.gcContactEmail ?? "",
+    phone: project.gcContactPhone ?? "",
+  });
+  const [architect, setArchitect] = useState<ContactState>({
+    name: project.architectName ?? "",
+    email: project.architectEmail ?? "",
+    phone: project.architectPhone ?? "",
+  });
+  const [engineer, setEngineer] = useState<ContactState>({
+    name: project.engineerName ?? "",
+    email: project.engineerEmail ?? "",
+    phone: project.engineerPhone ?? "",
+  });
+  const [owner, setOwner] = useState<ContactState>({
+    name: project.ownerName ?? "",
+    email: project.ownerEmail ?? "",
+    phone: project.ownerPhone ?? "",
+  });
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -486,6 +657,27 @@ function EditProjectDialog({
         ? parseFloat(String(project.contractValue))
         : null;
       if (parsedValue !== existingValue) body.contractValue = parsedValue;
+
+      // Contact fields — diff each against project original
+      const contactDiffs: Array<[string, string, string | null]> = [
+        ["gcCompanyName", gcCompanyName, project.gcCompanyName],
+        ["gcContactName", gcContact.name, project.gcContactName],
+        ["gcContactEmail", gcContact.email, project.gcContactEmail],
+        ["gcContactPhone", gcContact.phone, project.gcContactPhone],
+        ["architectName", architect.name, project.architectName],
+        ["architectEmail", architect.email, project.architectEmail],
+        ["architectPhone", architect.phone, project.architectPhone],
+        ["engineerName", engineer.name, project.engineerName],
+        ["engineerEmail", engineer.email, project.engineerEmail],
+        ["engineerPhone", engineer.phone, project.engineerPhone],
+        ["ownerName", owner.name, project.ownerName],
+        ["ownerEmail", owner.email, project.ownerEmail],
+        ["ownerPhone", owner.phone, project.ownerPhone],
+      ];
+      for (const [key, newVal, oldVal] of contactDiffs) {
+        const normalized = newVal.trim() || null;
+        if (normalized !== oldVal) body[key] = normalized;
+      }
 
       if (Object.keys(body).length === 0) {
         onClose();
@@ -516,7 +708,7 @@ function EditProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Project</DialogTitle>
           <DialogDescription>
@@ -591,6 +783,43 @@ function EditProjectDialog({
               required
             />
           </div>
+
+          {/* Project Contacts section */}
+          <div className="border-t border-border-card pt-4">
+            <p className="mb-4 text-sm font-medium text-text-primary">
+              Project Contacts (optional)
+            </p>
+            <div className="flex flex-col gap-5">
+              <ContactFields
+                label="General Contractor"
+                prefix="edit-gc"
+                contact={gcContact}
+                onChange={setGcContact}
+                showCompany
+                companyName={gcCompanyName}
+                onCompanyChange={setGcCompanyName}
+              />
+              <ContactFields
+                label="Architect"
+                prefix="edit-arch"
+                contact={architect}
+                onChange={setArchitect}
+              />
+              <ContactFields
+                label="Engineer"
+                prefix="edit-eng"
+                contact={engineer}
+                onChange={setEngineer}
+              />
+              <ContactFields
+                label="Owner"
+                prefix="edit-owner"
+                contact={owner}
+                onChange={setOwner}
+              />
+            </div>
+          </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel

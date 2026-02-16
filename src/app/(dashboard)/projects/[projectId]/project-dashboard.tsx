@@ -8,6 +8,13 @@ import {
   Upload,
   MessageSquare,
   Activity,
+  Building2,
+  User,
+  Mail,
+  Phone,
+  Ruler,
+  HardHat,
+  Landmark,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +29,19 @@ interface ProjectData {
   documentsCount: number;
   readyDocuments: number;
   rfisCount: number;
+  gcCompanyName: string | null;
+  gcContactName: string | null;
+  gcContactEmail: string | null;
+  gcContactPhone: string | null;
+  architectName: string | null;
+  architectEmail: string | null;
+  architectPhone: string | null;
+  engineerName: string | null;
+  engineerEmail: string | null;
+  engineerPhone: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  ownerPhone: string | null;
 }
 
 interface ActivityItem {
@@ -122,6 +142,93 @@ export function ProjectDashboard({
           </CardContent>
         </Card>
       </div>
+
+      {/* Project Contacts */}
+      {(() => {
+        const contacts = [
+          {
+            label: "General Contractor",
+            icon: Building2,
+            name: project.gcContactName,
+            email: project.gcContactEmail,
+            phone: project.gcContactPhone,
+            company: project.gcCompanyName,
+          },
+          {
+            label: "Architect",
+            icon: Ruler,
+            name: project.architectName,
+            email: project.architectEmail,
+            phone: project.architectPhone,
+          },
+          {
+            label: "Engineer",
+            icon: HardHat,
+            name: project.engineerName,
+            email: project.engineerEmail,
+            phone: project.engineerPhone,
+          },
+          {
+            label: "Owner",
+            icon: Landmark,
+            name: project.ownerName,
+            email: project.ownerEmail,
+            phone: project.ownerPhone,
+          },
+        ];
+        const populated = contacts.filter(
+          (c) => c.name || c.email || c.phone || ("company" in c && c.company)
+        );
+        if (populated.length === 0) return null;
+        return (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">Project Contacts</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                {populated.map((c) => {
+                  const Icon = c.icon;
+                  return (
+                    <div key={c.label} className="flex gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-border-card">
+                        <Icon className="h-4 w-4 text-text-secondary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                          {c.label}
+                        </p>
+                        {"company" in c && c.company && (
+                          <p className="text-sm font-medium text-text-primary">{c.company}</p>
+                        )}
+                        {c.name && (
+                          <p className="text-sm text-text-primary">{c.name}</p>
+                        )}
+                        {c.email && (
+                          <a
+                            href={`mailto:${c.email}`}
+                            className="block truncate text-sm text-brand-orange hover:underline"
+                          >
+                            {c.email}
+                          </a>
+                        )}
+                        {c.phone && (
+                          <a
+                            href={`tel:${c.phone}`}
+                            className="text-sm text-brand-orange hover:underline"
+                          >
+                            {c.phone}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Quick actions + recent activity */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

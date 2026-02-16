@@ -7,6 +7,7 @@ import { rateLimitGeneral } from "@/lib/rate-limit";
 
 const updateUserSchema = z.object({
   name: z.string().min(1).max(255).optional(),
+  phone: z.string().max(50).nullish(),
   role: z
     .enum([
       "ADMIN",
@@ -52,6 +53,7 @@ export async function PATCH(
 
     const updateData: Record<string, unknown> = {};
     if (parsed.data.name) updateData.name = parsed.data.name;
+    if (parsed.data.phone !== undefined) updateData.phone = parsed.data.phone;
     if (parsed.data.role) updateData.role = parsed.data.role;
     if (parsed.data.password && target.authMethod === "EMAIL_PASSWORD") {
       updateData.passwordHash = await hash(parsed.data.password, 12);
@@ -64,6 +66,7 @@ export async function PATCH(
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         authMethod: true,
         avatar: true,

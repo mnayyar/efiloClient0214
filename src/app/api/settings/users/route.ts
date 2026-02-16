@@ -16,6 +16,7 @@ const createUserSchema = z.object({
     "EXECUTIVE",
     "VIEWER",
   ]),
+  phone: z.string().max(50).optional(),
   authMethod: z.enum(["SSO", "EMAIL_PASSWORD"]),
   password: z.string().min(8).optional(),
 }).refine(
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         authMethod: true,
         avatar: true,
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, email, role, authMethod, password } = parsed.data;
+    const { name, email, phone, role, authMethod, password } = parsed.data;
 
     // Check if email already exists
     const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
@@ -102,6 +104,7 @@ export async function POST(request: NextRequest) {
       data: {
         name,
         email: email.toLowerCase(),
+        phone: phone || null,
         role,
         authMethod,
         passwordHash,
@@ -111,6 +114,7 @@ export async function POST(request: NextRequest) {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         authMethod: true,
         avatar: true,

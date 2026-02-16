@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getPool } from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth";
 import { rateLimitGeneral } from "@/lib/rate-limit";
 import { generateResponse } from "@/lib/ai";
 
+const draftPreviewSchema = z.object({
+  subject: z.string().min(1),
+  question: z.string().default(""),
+  priority: z.string().default("MEDIUM"),
+  assignedTo: z.string().optional(),
+  sourceDocIds: z.array(z.string()).default([]),
+});
+
 /**
  * Search for document chunks relevant to the RFI subject.
+ * Uses keyword matching (ILIKE) to find chunks that mention terms from the subject.
+ * Searches linked docs if provided, otherwise all project docs.
  */
 async function findRelevantChunks(
   projectId: string,
@@ -16,23 +27,27 @@ async function findRelevantChunks(
 ) {
   const pool = getPool();
 
+  // Build search terms from subject + question
   const searchText = `${subject} ${question}`.trim();
   const words = searchText
     .split(/\s+/)
     .filter((w) => w.length >= 3)
-    .map((w) => w.replace(/[%_'"]/g, ""))
-    .slice(0, 8);
+    .map((w) => w.replace(/[%_'"]/g, "")) // sanitize for LIKE
+    .slice(0, 8); // cap at 8 keywords
 
   if (words.length === 0) return [];
 
+  // Build WHERE clause: chunk must match at least one keyword
   const conditions = words.map((_, i) => `dc.content ILIKE $${i + 1}`);
   const params: unknown[] = words.map((w) => `%${w}%`);
 
   let docFilter = "";
   if (sourceDocIds.length > 0) {
+    // Search within linked documents
     params.push(sourceDocIds);
     docFilter = `AND d.id = ANY($${params.length}::text[])`;
   } else {
+    // Search all project documents
     params.push(projectId);
     docFilter = `AND d."projectId" = $${params.length}`;
   }
@@ -64,10 +79,10 @@ async function findRelevantChunks(
   }[];
 }
 
-// POST /api/projects/[projectId]/rfis/[rfiId]/ai-draft — Generate AI draft question
+// POST /api/projects/[projectId]/rfis/draft-preview — Generate AI draft without saving
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string; rfiId: string }> }
+  { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
     const user = await requireAuth(request);
@@ -79,22 +94,26 @@ export async function POST(
       );
     }
 
-    const { projectId, rfiId } = await params;
+    const { projectId } = await params;
+    const body = await request.json();
+    const parsed = draftPreviewSchema.safeParse(body);
 
-    const rfi = await prisma.rFI.findFirst({
-      where: { id: rfiId, projectId },
-    });
-
-    if (!rfi) {
-      return NextResponse.json({ error: "RFI not found" }, { status: 404 });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid input", details: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
 
-    // Find chunks relevant to the RFI subject from project documents
+    const { subject, question, priority, assignedTo, sourceDocIds } =
+      parsed.data;
+
+    // Find chunks relevant to the RFI subject
     const chunks = await findRelevantChunks(
       projectId,
-      rfi.subject,
-      rfi.question,
-      rfi.sourceDocIds
+      subject,
+      question,
+      sourceDocIds
     );
 
     let documentContext = "";
@@ -132,10 +151,10 @@ A brief statement on the schedule/cost impact if not resolved promptly.`;
 
     const userPrompt = `Draft a professional RFI question for the following:
 
-Subject: ${rfi.subject}
-${rfi.question ? `Rough draft / notes: ${rfi.question}` : ""}
-Priority: ${rfi.priority}
-${rfi.assignedTo ? `Assigned to: ${rfi.assignedTo}` : ""}
+Subject: ${subject}
+${question ? `Rough draft / notes: ${question}` : ""}
+Priority: ${priority}
+${assignedTo ? `Assigned to: ${assignedTo}` : ""}
 ${documentContext ? `\n${documentContext}` : "\nNo relevant document excerpts found. Use [bracketed placeholders] for all specific references."}
 
 Write a well-formatted RFI using the markdown structure from your instructions. Pull real values from the document excerpts. Return ONLY the formatted RFI content.`;
@@ -148,28 +167,18 @@ Write a well-formatted RFI using the markdown structure from your instructions. 
       temperature: 0.4,
     });
 
-    // Save the AI draft to the RFI
-    const updated = await prisma.rFI.update({
-      where: { id: rfiId },
-      data: {
-        aiDraftQuestion: aiResponse.content,
-        aiDraftModel: aiResponse.model,
-      },
-    });
-
     return NextResponse.json({
       data: {
         draft: aiResponse.content,
         model: aiResponse.model,
         tokensUsed: aiResponse.tokensUsed,
-        rfi: updated,
       },
     });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("AI draft generation error:", error);
+    console.error("AI draft preview error:", error);
     return NextResponse.json(
       { error: "Failed to generate AI draft" },
       { status: 500 }

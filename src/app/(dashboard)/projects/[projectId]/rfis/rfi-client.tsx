@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   FileWarning,
@@ -16,7 +16,19 @@ import {
   Trash2,
   X,
   Brain,
+  Mail,
+  DollarSign,
+  Activity,
 } from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +50,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface RFI {
   id: string;
@@ -114,48 +128,159 @@ function formatDate(iso: string) {
   });
 }
 
+type DashboardFilter =
+  | { type: "overdue"; label: string }
+  | { type: "co"; label: string }
+  | { type: "status"; status: string; label: string }
+  | { type: "aging"; minDays: number; maxDays: number; label: string }
+  | null;
+
+const OPEN_STATUSES = new Set(["SUBMITTED", "PENDING_GC", "OPEN"]);
+
+function applyDashboardFilter(rfis: RFI[], filter: DashboardFilter): RFI[] {
+  if (!filter) return rfis;
+  const now = Date.now();
+  switch (filter.type) {
+    case "overdue":
+      return rfis.filter((r) => r.isOverdue);
+    case "co":
+      return rfis.filter((r) => r.coFlag);
+    case "status":
+      return rfis.filter((r) => r.status === filter.status);
+    case "aging":
+      return rfis.filter((r) => {
+        if (!OPEN_STATUSES.has(r.status)) return false;
+        const days = Math.floor((now - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+        return days >= filter.minDays && days <= filter.maxDays;
+      });
+    default:
+      return rfis;
+  }
+}
+
 export function RfiPageClient({ projectId }: RfiClientProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailRfi, setDetailRfi] = useState<RFI | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
+  const [dashboardFilter, setDashboardFilter] = useState<DashboardFilter>(null);
+  const [showDashboard, setShowDashboard] = useState(true);
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["rfis", projectId, statusFilter, priorityFilter],
+  const { data: allRfis, isLoading } = useQuery({
+    queryKey: ["rfis", projectId],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (statusFilter) params.set("status", statusFilter);
-      if (priorityFilter) params.set("priority", priorityFilter);
-      const qs = params.toString();
-      const res = await fetch(
-        `/api/projects/${projectId}/rfis${qs ? `?${qs}` : ""}`
-      );
+      const res = await fetch(`/api/projects/${projectId}/rfis`);
       if (!res.ok) throw new Error("Failed to load RFIs");
       const json = await res.json();
       return json.data as RFI[];
     },
   });
 
-  const rfis = data ?? [];
+  const rfis = useMemo(() => {
+    let filtered = allRfis ?? [];
+    // Apply dashboard filter
+    filtered = applyDashboardFilter(filtered, dashboardFilter);
+    // Apply status dropdown filter
+    if (statusFilter) filtered = filtered.filter((r) => r.status === statusFilter);
+    // Apply priority dropdown filter
+    if (priorityFilter) filtered = filtered.filter((r) => r.priority === priorityFilter);
+    return filtered;
+  }, [allRfis, dashboardFilter, statusFilter, priorityFilter]);
+
+  function handleDashboardFilter(filter: DashboardFilter) {
+    // Clear dropdown filters when using dashboard filter
+    setStatusFilter(null);
+    setPriorityFilter(null);
+    setDashboardFilter(filter);
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-card px-6 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-card px-6 py-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-text-primary">
-            Notices & RFI
-          </h2>
-          <Badge variant="secondary">{rfis.length}</Badge>
+          {/* KPI chips */}
+          <KpiChip
+            icon={FileText}
+            label="Total"
+            value={String((allRfis ?? []).length)}
+            accent="text-brand-orange"
+            bg="bg-orange-50 dark:bg-orange-950/20"
+            active={!dashboardFilter}
+            onClick={() => handleDashboardFilter(null)}
+          />
+          <KpiChip
+            icon={AlertCircle}
+            label="Overdue"
+            value={String((allRfis ?? []).filter((r) => r.isOverdue).length)}
+            accent={(allRfis ?? []).some((r) => r.isOverdue) ? "text-red-600" : "text-text-secondary"}
+            bg={(allRfis ?? []).some((r) => r.isOverdue) ? "bg-red-50 dark:bg-red-950/20" : "bg-gray-50 dark:bg-gray-800/30"}
+            active={dashboardFilter?.type === "overdue"}
+            disabled={!(allRfis ?? []).some((r) => r.isOverdue)}
+            onClick={() => handleDashboardFilter({ type: "overdue", label: "Overdue RFIs" })}
+          />
+          <KpiChip
+            icon={Clock}
+            label="Avg Resp"
+            value={(() => {
+              const times = (allRfis ?? [])
+                .filter((r) => r.submittedAt && r.respondedAt)
+                .map((r) => (new Date(r.respondedAt!).getTime() - new Date(r.submittedAt!).getTime()) / 86400000);
+              return times.length > 0 ? `${Math.round(times.reduce((a, b) => a + b, 0) / times.length)}d` : "—";
+            })()}
+            accent="text-blue-600"
+            bg="bg-blue-50 dark:bg-blue-950/20"
+          />
+          <KpiChip
+            icon={DollarSign}
+            label="Potential CO"
+            value={(() => {
+              const co = (allRfis ?? []).filter((r) => r.coFlag);
+              return co.length > 0 ? `$${co.reduce((s, r) => s + (r.coEstimate ?? 0), 0).toLocaleString()} (${co.length})` : "None";
+            })()}
+            accent={(allRfis ?? []).some((r) => r.coFlag) ? "text-amber-600" : "text-text-secondary"}
+            bg="bg-amber-50 dark:bg-amber-950/20"
+            active={dashboardFilter?.type === "co"}
+            disabled={!(allRfis ?? []).some((r) => r.coFlag)}
+            onClick={() => handleDashboardFilter({ type: "co", label: "Change Order Exposure" })}
+          />
+
+          {/* Active filter chip */}
+          {dashboardFilter && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-brand-orange/30 bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-brand-orange dark:bg-orange-950/20">
+              {dashboardFilter.label}
+              <button
+                onClick={() => setDashboardFilter(null)}
+                className="ml-0.5 rounded-full p-0.5 hover:bg-orange-100 dark:hover:bg-orange-900/30"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
+          {(allRfis ?? []).length > 0 && (
+            <Button
+              variant={showDashboard ? "secondary" : "ghost"}
+              size="sm"
+              className="h-7 gap-1 text-[11px]"
+              onClick={() => setShowDashboard(!showDashboard)}
+            >
+              <Activity className="h-3 w-3" />
+              Dashboard
+            </Button>
+          )}
+
           <Select
             value={statusFilter ?? "ALL"}
-            onValueChange={(v) => setStatusFilter(v === "ALL" ? null : v)}
+            onValueChange={(v) => {
+              setStatusFilter(v === "ALL" ? null : v);
+              setDashboardFilter(null);
+            }}
           >
-            <SelectTrigger className="h-8 w-[140px] text-xs">
+            <SelectTrigger className="h-7 w-[130px] text-[11px]">
               <Filter className="mr-1 h-3 w-3" />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -171,9 +296,12 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
 
           <Select
             value={priorityFilter ?? "ALL"}
-            onValueChange={(v) => setPriorityFilter(v === "ALL" ? null : v)}
+            onValueChange={(v) => {
+              setPriorityFilter(v === "ALL" ? null : v);
+              setDashboardFilter(null);
+            }}
           >
-            <SelectTrigger className="h-8 w-[130px] text-xs">
+            <SelectTrigger className="h-7 w-[120px] text-[11px]">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -186,14 +314,23 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
             </SelectContent>
           </Select>
 
-          {rfis.length > 0 && (
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="mr-1.5 h-4 w-4" />
+          {(allRfis ?? []).length > 0 && (
+            <Button size="sm" className="h-7 text-[11px]" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-1 h-3.5 w-3.5" />
               Create RFI
             </Button>
           )}
         </div>
       </div>
+
+      {/* Dashboard */}
+      {showDashboard && (allRfis ?? []).length > 0 && (
+        <RfiDashboard
+          rfis={allRfis ?? []}
+          activeFilter={dashboardFilter}
+          onFilter={handleDashboardFilter}
+        />
+      )}
 
       {/* List */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -205,7 +342,7 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
           </div>
         ) : rfis.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6">
-            {statusFilter || priorityFilter ? (
+            {statusFilter || priorityFilter || dashboardFilter ? (
               <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-card py-12 px-8">
                 <Filter className="h-8 w-8 text-text-secondary" />
                 <p className="text-sm text-text-secondary">
@@ -217,6 +354,7 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
                   onClick={() => {
                     setStatusFilter(null);
                     setPriorityFilter(null);
+                    setDashboardFilter(null);
                   }}
                 >
                   Clear Filters
@@ -357,6 +495,267 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
   );
 }
 
+/* ── KPI Chip ──────────────────────────────────────────────── */
+
+function KpiChip({
+  icon: Icon,
+  label,
+  value,
+  accent,
+  bg,
+  active,
+  disabled,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  accent: string;
+  bg: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  const interactive = !!onClick && !disabled;
+  const Tag = interactive ? "button" : "div";
+  return (
+    <Tag
+      onClick={interactive ? onClick : undefined}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md border px-2 py-1 text-left transition-all",
+        bg,
+        interactive && "hover:ring-1 hover:ring-brand-orange/30",
+        active ? "border-brand-orange ring-1 ring-brand-orange/30" : "border-border-card",
+        disabled && "cursor-default"
+      )}
+    >
+      <Icon className={cn("h-3 w-3 shrink-0", accent)} />
+      <span className="text-[10px] font-medium text-text-secondary">{label}</span>
+      <span className={cn("text-sm font-bold leading-none", accent)}>{value}</span>
+    </Tag>
+  );
+}
+
+/* ── RFI Dashboard ─────────────────────────────────────────── */
+
+const AGING_BRACKETS = [
+  { label: "0-7 days", max: 7, color: "#0F8A5F" },
+  { label: "8-14 days", max: 14, color: "#C67F17" },
+  { label: "15-21 days", max: 21, color: "#EA580C" },
+  { label: "21+ days", max: Infinity, color: "#DC2626" },
+] as const;
+
+const PIPELINE_STATUSES = ["DRAFT", "SUBMITTED", "PENDING_GC", "OPEN", "ANSWERED", "CLOSED", "VOID"] as const;
+
+const PIPELINE_COLORS: Record<string, string> = {
+  DRAFT: "#9CA3AF",
+  SUBMITTED: "#3B82F6",
+  PENDING_GC: "#F59E0B",
+  OPEN: "#10B981",
+  ANSWERED: "#8B5CF6",
+  CLOSED: "#64748B",
+  VOID: "#EF4444",
+};
+
+function RfiDashboard({
+  rfis,
+  activeFilter,
+  onFilter,
+}: {
+  rfis: RFI[];
+  activeFilter: DashboardFilter;
+  onFilter: (filter: DashboardFilter) => void;
+}) {
+  const stats = useMemo(() => {
+    const now = Date.now();
+    const openStatuses = new Set(["SUBMITTED", "PENDING_GC", "OPEN"]);
+
+    // Aging breakdown (open RFIs only)
+    const aging = AGING_BRACKETS.map((b) => ({ ...b, count: 0 }));
+    for (const r of rfis) {
+      if (!openStatuses.has(r.status)) continue;
+      const daysOpen = Math.floor((now - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+      const bracket = aging.find((b, i) => {
+        const min = i === 0 ? 0 : AGING_BRACKETS[i - 1].max + 1;
+        return daysOpen >= min && daysOpen <= b.max;
+      });
+      if (bracket) bracket.count++;
+    }
+
+    // Status pipeline
+    const pipeline = PIPELINE_STATUSES.map((s) => ({
+      status: s,
+      label: s.replace(/_/g, " "),
+      count: rfis.filter((r) => r.status === s).length,
+      color: PIPELINE_COLORS[s],
+    }));
+
+    // Recent activity (last 5 updated)
+    const recentActivity = [...rfis]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 5);
+
+    return { aging, pipeline, recentActivity };
+  }, [rfis]);
+
+  function isActive(type: string, extra?: string) {
+    if (!activeFilter) return false;
+    if (activeFilter.type !== type) return false;
+    if (type === "status" && activeFilter.type === "status") return activeFilter.status === extra;
+    if (type === "aging" && activeFilter.type === "aging") return activeFilter.label === extra;
+    return true;
+  }
+
+  return (
+    <div className="border-b border-border-card bg-brand-off-white/30 px-6 py-3 dark:bg-muted/20">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {/* Aging Breakdown */}
+        <div className="rounded-lg border border-border-card bg-white p-3 dark:bg-background">
+          <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+            Open RFI Aging
+          </h4>
+          <div className="h-[110px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={stats.aging}
+                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                style={{ cursor: "pointer" }}
+              >
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: "#57534E" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 9, fill: "#57534E" }}
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    fontSize: 11,
+                    borderRadius: 6,
+                    border: "1px solid #E8E5DE",
+                  }}
+                  formatter={(value: number) => [value, "RFIs"]}
+                />
+                <Bar
+                  dataKey="count"
+                  radius={[4, 4, 0, 0]}
+                  onClick={(data) => {
+                    if (!data || data.count === 0) return;
+                    const idx = stats.aging.findIndex((a) => a.label === data.label);
+                    const minDays = idx === 0 ? 0 : AGING_BRACKETS[idx - 1].max + 1;
+                    const maxDays = data.max === Infinity ? 99999 : data.max;
+                    onFilter({ type: "aging", minDays, maxDays, label: `Aging: ${data.label}` });
+                  }}
+                >
+                  {stats.aging.map((entry, i) => {
+                    const agingLabel = `Aging: ${entry.label}`;
+                    const active = activeFilter?.type === "aging" && activeFilter.label === agingLabel;
+                    return (
+                      <Cell
+                        key={i}
+                        fill={entry.color}
+                        opacity={active ? 1 : 0.7}
+                        stroke={active ? entry.color : "none"}
+                        strokeWidth={2}
+                        style={{ cursor: entry.count > 0 ? "pointer" : "default" }}
+                      />
+                    );
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Status Pipeline */}
+        <div className="rounded-lg border border-border-card bg-white p-3 dark:bg-background">
+          <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+            Status Pipeline
+          </h4>
+          <div className="flex gap-1">
+            {stats.pipeline.map((s) => (
+              <button
+                key={s.status}
+                onClick={() =>
+                  s.count > 0 &&
+                  onFilter({ type: "status", status: s.status, label: formatStatus(s.status) })
+                }
+                className={cn(
+                  "flex-1 text-center rounded py-1 transition-all",
+                  s.count > 0 && "hover:ring-2 hover:ring-brand-orange/20",
+                  isActive("status", s.status) && "ring-2 ring-brand-orange/40",
+                  s.count === 0 && "cursor-default opacity-50"
+                )}
+              >
+                <div
+                  className="mx-auto mb-0.5 flex h-7 items-center justify-center rounded"
+                  style={{ backgroundColor: s.color + "18" }}
+                >
+                  <span
+                    className="text-xs font-bold"
+                    style={{ color: s.color }}
+                  >
+                    {s.count}
+                  </span>
+                </div>
+                <span className="text-[8px] font-medium leading-tight text-text-secondary">
+                  {s.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Activity */}
+        <div className="rounded-lg border border-border-card bg-white p-3 dark:bg-background">
+          <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+            Recent Activity
+          </h4>
+          <div className="space-y-1">
+            {stats.recentActivity.map((r) => (
+              <button
+                key={r.id}
+                onClick={() =>
+                  onFilter({ type: "status", status: r.status, label: formatStatus(r.status) })
+                }
+                className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-left transition-colors hover:bg-brand-off-white dark:hover:bg-muted"
+              >
+                <span
+                  className={cn(
+                    "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+                    r.status === "DRAFT" && "bg-gray-400",
+                    r.status === "SUBMITTED" && "bg-blue-500",
+                    r.status === "PENDING_GC" && "bg-amber-500",
+                    r.status === "OPEN" && "bg-emerald-500",
+                    r.status === "ANSWERED" && "bg-purple-500",
+                    r.status === "CLOSED" && "bg-slate-500",
+                    r.status === "VOID" && "bg-red-500"
+                  )}
+                />
+                <span className="font-mono text-[10px] font-semibold text-brand-orange">
+                  {r.rfiNumber}
+                </span>
+                <span className="truncate text-text-primary">{r.subject}</span>
+                <span className="ml-auto shrink-0 text-[9px] text-text-secondary">
+                  {formatDate(r.updatedAt)}
+                </span>
+              </button>
+            ))}
+            {stats.recentActivity.length === 0 && (
+              <p className="text-[11px] text-text-secondary">No activity yet</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Create RFI Dialog ──────────────────────────────────────── */
 
 function CreateRfiDialog({
@@ -377,6 +776,7 @@ function CreateRfiDialog({
   const [dueDate, setDueDate] = useState("");
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [showDocPicker, setShowDocPicker] = useState(false);
+  const [aiDraft, setAiDraft] = useState<string | null>(null);
 
   // Fetch project documents for linking
   const { data: documents } = useQuery({
@@ -427,6 +827,37 @@ function CreateRfiDialog({
     },
   });
 
+  const aiDraftMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/rfis/draft-preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject,
+            question,
+            priority,
+            assignedTo: assignedTo.trim() || undefined,
+            sourceDocIds: selectedDocIds,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to generate AI draft");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setAiDraft(data.data.draft);
+      toast.success("AI draft generated");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
   function resetForm() {
     setSubject("");
     setQuestion("");
@@ -435,6 +866,7 @@ function CreateRfiDialog({
     setDueDate("");
     setSelectedDocIds([]);
     setShowDocPicker(false);
+    setAiDraft(null);
   }
 
   return (
@@ -474,16 +906,71 @@ function CreateRfiDialog({
 
           {/* Question */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="rfi-question">Question *</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="rfi-question">Question *</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 text-[11px] text-purple-600 hover:text-purple-700"
+                onClick={() => aiDraftMutation.mutate()}
+                disabled={aiDraftMutation.isPending || !subject.trim()}
+              >
+                {aiDraftMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                AI Draft
+              </Button>
+            </div>
             <textarea
               id="rfi-question"
               value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Describe the information you need..."
+              onChange={(e) => {
+                setQuestion(e.target.value);
+                if (aiDraft) setAiDraft(null);
+              }}
+              placeholder="Describe the information you need (or just fill in the subject and click AI Draft)..."
               required
               rows={4}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             />
+
+            {/* AI Draft preview */}
+            {aiDraft && (
+              <div className="rounded-md border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/20">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-purple-600">
+                  <Sparkles className="h-3 w-3" />
+                  AI-Generated Draft
+                </div>
+                <div className="prose prose-sm max-w-none text-text-primary prose-strong:text-text-primary prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                  <Markdown remarkPlugins={[remarkGfm]}>{aiDraft}</Markdown>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setQuestion(aiDraft);
+                      setAiDraft(null);
+                    }}
+                  >
+                    Use This Draft
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-text-secondary"
+                    onClick={() => setAiDraft(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Priority + Assigned To row */}
@@ -763,6 +1250,28 @@ function RfiDetailDialog({
     },
   });
 
+  const sendEmailMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/rfis/${rfi!.id}/send-email`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to send email");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("RFI email sent to GC contact");
+      onUpdated();
+      onClose();
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
   if (!rfi) return null;
 
   return (
@@ -859,8 +1368,10 @@ function RfiDetailDialog({
                 <Sparkles className="h-3 w-3" />
                 AI-Generated Draft
               </h4>
-              <div className="whitespace-pre-wrap rounded-md border border-purple-200 bg-purple-50 p-3 text-sm text-text-primary dark:border-purple-800 dark:bg-purple-950/20">
-                {rfi.aiDraftQuestion}
+              <div className="rounded-md border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/20">
+                <div className="prose prose-sm max-w-none text-text-primary prose-strong:text-text-primary prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                  <Markdown remarkPlugins={[remarkGfm]}>{rfi.aiDraftQuestion}</Markdown>
+                </div>
               </div>
               <div className="mt-1 flex items-center justify-between">
                 <p className="text-[10px] text-text-secondary">
@@ -974,8 +1485,10 @@ function RfiDetailDialog({
                 <Brain className="h-3 w-3" />
                 AI Response Analysis
               </h4>
-              <div className="whitespace-pre-wrap rounded-md border border-purple-200 bg-purple-50 p-3 text-sm text-text-primary dark:border-purple-800 dark:bg-purple-950/20">
-                {rfi.aiResponseAnalysis}
+              <div className="rounded-md border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/20">
+                <div className="prose prose-sm max-w-none text-text-primary prose-strong:text-text-primary prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                  <Markdown remarkPlugins={[remarkGfm]}>{rfi.aiResponseAnalysis}</Markdown>
+                </div>
               </div>
             </div>
           )}
@@ -1012,6 +1525,24 @@ function RfiDetailDialog({
               >
                 {updateMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                 Change Status
+              </Button>
+            )}
+
+            {/* Send Email */}
+            {(rfi.status === "DRAFT" || rfi.status === "SUBMITTED") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-blue-800 dark:hover:bg-blue-950/30"
+                onClick={() => sendEmailMutation.mutate()}
+                disabled={sendEmailMutation.isPending}
+              >
+                {sendEmailMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Mail className="h-3 w-3" />
+                )}
+                {rfi.status === "SUBMITTED" ? "Resend Email" : "Send Email"}
               </Button>
             )}
 
