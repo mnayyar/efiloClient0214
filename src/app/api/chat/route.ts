@@ -10,6 +10,7 @@ import {
   generateSuggestedPrompts,
   logSearchAnalytics,
 } from "@/services/search";
+import { generateWebSearchResponse } from "@/lib/ai";
 import { createId } from "@paralleldrive/cuid2";
 import type { Prisma } from "@prisma/client";
 
@@ -19,6 +20,7 @@ const chatRequestSchema = z.object({
   projectId: z.string(),
   documentTypes: z.array(z.string()).optional(),
   userRole: z.string().optional(),
+  scope: z.enum(["PROJECT", "CROSS_PROJECT", "WORLD"]).optional(),
 });
 
 function formatSSE(data: Record<string, unknown>): Uint8Array {
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { query, sessionId, projectId, documentTypes, userRole } =
+    const { query, sessionId, projectId, documentTypes, userRole, scope: userScope } =
       parsed.data;
 
     // Verify project exists
@@ -93,7 +95,8 @@ export async function POST(request: NextRequest) {
         user,
         session,
         documentTypes,
-        userRole
+        userRole,
+        userScope
       );
     }
 
@@ -104,7 +107,8 @@ export async function POST(request: NextRequest) {
       user,
       session,
       documentTypes,
-      userRole
+      userRole,
+      userScope
     );
   } catch (error) {
     if (error instanceof AuthError) {
@@ -124,15 +128,71 @@ async function handleJsonResponse(
   user: { id: string },
   session: { id: string; messages: unknown },
   documentTypes?: string[],
-  userRole?: string
+  userRole?: string,
+  userScope?: "PROJECT" | "CROSS_PROJECT" | "WORLD"
 ) {
   const start = Date.now();
+
+  // ── WORLD scope: skip classification & document search, use web search ──
+  if (userScope === "WORLD") {
+    const webResult = await generateWebSearchResponse(query);
+    const searchTimeMs = Date.now() - start;
+
+    const messages = (session.messages as Prisma.JsonArray) || [];
+    const assistantMsgId = createId();
+
+    const userMsg: Prisma.JsonObject = {
+      id: createId(),
+      role: "user",
+      content: query,
+      timestamp: new Date().toISOString(),
+    };
+    const assistantMsg: Prisma.JsonObject = {
+      id: assistantMsgId,
+      role: "assistant",
+      content: webResult.content,
+      scope: "WORLD",
+      webCitations: webResult.citations as unknown as Prisma.JsonArray,
+      timestamp: new Date().toISOString(),
+    };
+
+    await prisma.chatSession.update({
+      where: { id: session.id },
+      data: { messages: [...messages, userMsg, assistantMsg] },
+    });
+
+    await logSearchAnalytics({
+      userId: user.id,
+      query,
+      scope: "WORLD",
+      projectId: project.id,
+      resultCount: webResult.citations.length,
+      searchTimeMs,
+      tokenCount: webResult.tokensUsed.input + webResult.tokensUsed.output,
+    });
+
+    return NextResponse.json({
+      data: {
+        response: webResult.content,
+        webCitations: webResult.citations,
+        scope: "WORLD",
+        searchTimeMs,
+        sessionId: session.id,
+        messageId: assistantMsgId,
+      },
+    });
+  }
+
+  // ── PROJECT / CROSS_PROJECT: existing document search pipeline ──
 
   // 1. Classify
   const classification = await classifyQuery(query, {
     projectId: project.id,
     projectName: project.name,
   });
+
+  // User-selected scope overrides classification
+  const scope = userScope ?? classification.scope;
 
   const docTypes =
     documentTypes && documentTypes.length > 0
@@ -145,7 +205,7 @@ async function handleJsonResponse(
   const { results: chunks } = await searchAndRank({
     query,
     projectId: project.id,
-    scope: classification.scope,
+    scope,
     documentTypes: docTypes,
     activeProjectId: project.id,
   });
@@ -153,14 +213,14 @@ async function handleJsonResponse(
   // 3. Generate answer
   const answer = await generateSearchAnswer(query, chunks, {
     projectName: project.name,
-    scope: classification.scope,
+    scope: scope,
     userRole,
   });
 
   // 4. Suggested prompts
   const suggestedPrompts = await generateSuggestedPrompts(query, chunks, {
     projectName: project.name,
-    scope: classification.scope,
+    scope: scope,
     userRole,
   });
 
@@ -182,7 +242,7 @@ async function handleJsonResponse(
     role: "assistant",
     content: answer.response,
     sources: answer.sources as unknown as Prisma.JsonArray,
-    scope: classification.scope,
+    scope: scope,
     confidence: answer.confidence,
     alerts: answer.alerts as unknown as Prisma.JsonArray,
     timestamp: new Date().toISOString(),
@@ -197,7 +257,7 @@ async function handleJsonResponse(
   await logSearchAnalytics({
     userId: user.id,
     query,
-    scope: classification.scope,
+    scope: scope,
     projectId: project.id,
     resultCount: chunks.length,
     searchTimeMs,
@@ -208,7 +268,7 @@ async function handleJsonResponse(
     data: {
       response: answer.response,
       sources: answer.sources,
-      scope: classification.scope,
+      scope: scope,
       searchTimeMs,
       confidence: answer.confidence,
       suggestedPrompts,
@@ -225,12 +285,84 @@ function handleStreamingResponse(
   user: { id: string },
   session: { id: string; messages: unknown },
   documentTypes?: string[],
-  userRole?: string
+  userRole?: string,
+  userScope?: "PROJECT" | "CROSS_PROJECT" | "WORLD"
 ) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
         const start = Date.now();
+
+        // ── WORLD scope: skip classification & document search, use web search ──
+        if (userScope === "WORLD") {
+          controller.enqueue(
+            formatSSE({ type: "status", message: "Searching the web..." })
+          );
+
+          const webResult = await generateWebSearchResponse(query);
+
+          controller.enqueue(
+            formatSSE({
+              type: "answer",
+              data: {
+                response: webResult.content,
+                webCitations: webResult.citations,
+              },
+            })
+          );
+
+          // Save session messages
+          const messages = (session.messages as Prisma.JsonArray) || [];
+          const assistantMsgId = createId();
+
+          const userMsg: Prisma.JsonObject = {
+            id: createId(),
+            role: "user",
+            content: query,
+            timestamp: new Date().toISOString(),
+          };
+          const assistantMsg: Prisma.JsonObject = {
+            id: assistantMsgId,
+            role: "assistant",
+            content: webResult.content,
+            scope: "WORLD",
+            webCitations: webResult.citations as unknown as Prisma.JsonArray,
+            timestamp: new Date().toISOString(),
+          };
+
+          await prisma.chatSession.update({
+            where: { id: session.id },
+            data: { messages: [...messages, userMsg, assistantMsg] },
+          });
+
+          const searchTimeMs = Date.now() - start;
+
+          // Non-blocking analytics — don't let logging failures break the response
+          logSearchAnalytics({
+            userId: user.id,
+            query,
+            scope: "WORLD",
+            projectId: project.id,
+            resultCount: webResult.citations.length,
+            searchTimeMs,
+            tokenCount: webResult.tokensUsed.input + webResult.tokensUsed.output,
+          }).catch((err) => console.error("Analytics error:", err));
+
+          controller.enqueue(
+            formatSSE({
+              type: "done",
+              data: {
+                sessionId: session.id,
+                messageId: assistantMsgId,
+                searchTimeMs,
+              },
+            })
+          );
+          controller.close();
+          return;
+        }
+
+        // ── PROJECT / CROSS_PROJECT: existing document search pipeline ──
 
         // 1. Classify
         controller.enqueue(
@@ -242,11 +374,14 @@ function handleStreamingResponse(
           projectName: project.name,
         });
 
+        // User-selected scope overrides classification
+        const scope = userScope ?? classification.scope;
+
         controller.enqueue(
           formatSSE({
             type: "classification",
             data: {
-              scope: classification.scope,
+              scope,
               intent: classification.intent,
             },
           })
@@ -267,7 +402,7 @@ function handleStreamingResponse(
         const { results: chunks } = await searchAndRank({
           query,
           projectId: project.id,
-          scope: classification.scope,
+          scope: scope,
           documentTypes: docTypes,
           activeProjectId: project.id,
         });
@@ -292,7 +427,7 @@ function handleStreamingResponse(
 
         const answer = await generateSearchAnswer(query, chunks, {
           projectName: project.name,
-          scope: classification.scope,
+          scope: scope,
           userRole,
         });
 
@@ -313,7 +448,7 @@ function handleStreamingResponse(
           chunks,
           {
             projectName: project.name,
-            scope: classification.scope,
+            scope: scope,
             userRole,
           }
         );
@@ -338,7 +473,7 @@ function handleStreamingResponse(
           role: "assistant",
           content: answer.response,
           sources: answer.sources as unknown as Prisma.JsonArray,
-          scope: classification.scope,
+          scope: scope,
           confidence: answer.confidence,
           alerts: answer.alerts as unknown as Prisma.JsonArray,
           timestamp: new Date().toISOString(),
@@ -355,7 +490,7 @@ function handleStreamingResponse(
         await logSearchAnalytics({
           userId: user.id,
           query,
-          scope: classification.scope,
+          scope: scope,
           projectId: project.id,
           resultCount: chunks.length,
           searchTimeMs,

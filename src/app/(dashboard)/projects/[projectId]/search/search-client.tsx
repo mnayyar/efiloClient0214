@@ -41,7 +41,7 @@ export function SearchPageClient({ projectId }: SearchPageClientProps) {
   );
 
   const handleSend = useCallback(
-    (query: string, options?: { scope?: "PROJECT" | "CROSS_PROJECT" }) => {
+    (query: string, options?: { scope?: "PROJECT" | "CROSS_PROJECT" | "WORLD" }) => {
       setPendingPrompt(null);
       sendMessage(query, options);
     },

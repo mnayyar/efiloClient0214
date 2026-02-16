@@ -110,8 +110,8 @@ export async function classifyQuery(
 ): Promise<QueryClassification> {
   try {
     const response = await generateResponse({
-      model: "sonnet",
-      maxTokens: 500,
+      model: "haiku",
+      maxTokens: 200,
       temperature: 0.1,
       systemPrompt: QUERY_CLASSIFICATION_PROMPT,
       userPrompt: `Query: "${query}"\nCurrent project: ${projectContext.projectName} (${projectContext.projectId})`,
@@ -148,7 +148,7 @@ export async function searchAndRank(
     documentTypes,
     activeProjectId: activeProjectId ?? projectId,
     limit: 20,
-    threshold: 0.35,
+    threshold: 0.15,
   });
 
   const grouped = groupByDocument(results);
@@ -184,6 +184,7 @@ CITATION FORMAT:
 - Use inline citations: [Source N] where N is the source number.
 - Every factual claim MUST have a citation.
 - If multiple sources support a claim, cite all: [Source 1, Source 3].
+- ONLY cite sources that directly contain information relevant to the answer. Do NOT cite a source just because it was provided — if a source does not contain information that helps answer the question, do not reference it at all.
 
 CONFLICT DETECTION:
 - If sources contradict each other, flag it with "⚠️ **Conflict:**" followed by the details.
@@ -244,7 +245,7 @@ export async function generateSearchAnswer(
 
   const answerResponse = await generateResponse({
     model: "sonnet",
-    maxTokens: 1500,
+    maxTokens: 1000,
     temperature: 0.3,
     systemPrompt: ANSWER_GENERATION_PROMPT,
     userPrompt: `Query: "${query}"\n\nProject: ${context.projectName}\nScope: ${context.scope}\nUser Role: ${context.userRole ?? "project_manager"}\n\nRetrieved Documents:\n${chunksContext}`,
@@ -321,8 +322,8 @@ export async function generateSuggestedPrompts(
   try {
     const docTypes = [...new Set(chunks.map((c) => c.documentType))].join(", ");
     const response = await generateResponse({
-      model: "sonnet",
-      maxTokens: 1000,
+      model: "haiku",
+      maxTokens: 300,
       temperature: 0.5,
       systemPrompt: SUGGESTED_PROMPTS_PROMPT,
       userPrompt: `Last query: "${query}"\nRetrieved doc types: ${docTypes}\nScope: ${context.scope}\nProject: ${context.projectName}\nUser role: ${context.userRole ?? "project_manager"}`,
@@ -462,7 +463,7 @@ function groupByDocument(results: ScoredResult[]): GroupedResult[] {
 export async function logSearchAnalytics(params: {
   userId: string;
   query: string;
-  scope: "PROJECT" | "CROSS_PROJECT";
+  scope: "PROJECT" | "CROSS_PROJECT" | "WORLD";
   projectId?: string;
   resultCount: number;
   searchTimeMs: number;

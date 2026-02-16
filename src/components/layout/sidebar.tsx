@@ -191,14 +191,14 @@ export function Sidebar({ collapsed, onToggle, activeProjectId }: SidebarProps) 
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white">
               <Image
                 src="/logo.svg"
-                alt="efilo.ai"
+                alt="efilo"
                 width={22}
                 height={22}
               />
             </div>
             {!collapsed && (
               <span className="text-lg font-semibold text-white">
-                efilo.ai
+                efilo
               </span>
             )}
           </Link>

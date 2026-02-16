@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, MessageSquare, Archive, Loader2 } from "lucide-react";
+import { Plus, MessageSquare, Archive, Loader2, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Session {
@@ -27,6 +28,7 @@ export function SessionList({
   onNewChat,
 }: SessionListProps) {
   const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
 
   const { data: sessions, isLoading } = useQuery({
     queryKey: ["chat-sessions", projectId],
@@ -48,6 +50,15 @@ export function SessionList({
     },
   });
 
+  const filteredSessions = useMemo(() => {
+    if (!sessions) return [];
+    if (!search.trim()) return sessions;
+    const q = search.toLowerCase();
+    return sessions.filter((s) =>
+      (s.title ?? "").toLowerCase().includes(q)
+    );
+  }, [sessions, search]);
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     const now = new Date();
@@ -64,7 +75,7 @@ export function SessionList({
     <div className="flex h-full flex-col border-r border-border-card bg-brand-off-white dark:bg-card">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border-card px-4 py-3">
-        <h3 className="text-sm font-semibold text-text-primary">History</h3>
+        <h3 className="text-sm font-semibold text-text-primary">Conversation History</h3>
         <button
           onClick={onNewChat}
           className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-border-card hover:text-text-primary"
@@ -73,6 +84,30 @@ export function SessionList({
           <Plus className="h-4 w-4" />
         </button>
       </div>
+
+      {/* Search */}
+      {sessions && sessions.length > 0 && (
+        <div className="border-b border-border-card px-3 py-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-secondary" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search conversations..."
+              className="w-full rounded-md border border-border-card bg-white py-1.5 pl-7 pr-7 text-xs text-text-primary placeholder:text-text-secondary focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Sessions */}
       <div className="flex-1 overflow-y-auto">
@@ -84,9 +119,13 @@ export function SessionList({
           <p className="px-4 py-8 text-center text-xs text-text-secondary">
             No conversations yet
           </p>
+        ) : filteredSessions.length === 0 ? (
+          <p className="px-4 py-8 text-center text-xs text-text-secondary">
+            No matching conversations
+          </p>
         ) : (
           <div className="space-y-0.5 p-2">
-            {sessions.map((session) => (
+            {filteredSessions.map((session) => (
               <div
                 key={session.id}
                 className={cn(

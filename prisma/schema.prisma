@@ -206,6 +206,7 @@ enum NotificationChannel {
 enum SearchScope {
   PROJECT
   CROSS_PROJECT
+  WORLD
 }
 
 enum ContractClauseKind {

@@ -23,15 +23,21 @@ interface SuggestedPrompt {
   category: string;
 }
 
+export interface WebCitation {
+  url: string;
+  title: string;
+}
+
 export interface Message {
   id?: string;
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  webCitations?: WebCitation[];
   confidence?: number;
   alerts?: Alert[];
   suggestedPrompts?: SuggestedPrompt[];
-  scope?: "PROJECT" | "CROSS_PROJECT";
+  scope?: "PROJECT" | "CROSS_PROJECT" | "WORLD";
   timestamp?: string;
 }
 
@@ -45,19 +51,19 @@ export function useChat({ projectId, onSessionCreated }: UseChatOptions) {
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [currentSources, setCurrentSources] = useState<Source[]>([]);
+  const sourcesRef = useRef<Source[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
     async (
       query: string,
-      options?: { documentTypes?: string[]; scope?: "PROJECT" | "CROSS_PROJECT" }
+      options?: { documentTypes?: string[]; scope?: "PROJECT" | "CROSS_PROJECT" | "WORLD" }
     ) => {
       if (isLoading) return;
 
       setIsLoading(true);
       setStatus("Classifying query...");
-      setCurrentSources([]);
+      sourcesRef.current = [];
 
       // Add user message optimistically
       const userMsg: Message = {
@@ -81,6 +87,7 @@ export function useChat({ projectId, onSessionCreated }: UseChatOptions) {
             sessionId,
             projectId,
             documentTypes: options?.documentTypes,
+            scope: options?.scope,
           }),
           signal: abortRef.current.signal,
         });
@@ -118,7 +125,7 @@ export function useChat({ projectId, onSessionCreated }: UseChatOptions) {
                   break;
 
                 case "sources":
-                  setCurrentSources(data.data);
+                  sourcesRef.current = data.data;
                   setStatus("Generating answer...");
                   break;
 
@@ -128,6 +135,7 @@ export function useChat({ projectId, onSessionCreated }: UseChatOptions) {
                     content: data.data.response,
                     confidence: data.data.confidence,
                     alerts: data.data.alerts,
+                    webCitations: data.data.webCitations,
                   };
                   setMessages((prev) => [...prev, assistantMsg]);
                   break;
@@ -155,13 +163,32 @@ export function useChat({ projectId, onSessionCreated }: UseChatOptions) {
                     onSessionCreated?.(newSessionId);
                   }
 
-                  // Attach sources to last assistant message
+                  // Attach only cited sources to last assistant message
                   setMessages((prev) => {
                     const last = prev[prev.length - 1];
                     if (last?.role === "assistant") {
+                      // Extract cited source numbers from [Source N] patterns
+                      const cited = new Set<number>();
+                      const citationPattern = /\[Source\s+(\d+)(?:\s*,\s*Source\s+(\d+))*\]/gi;
+                      let match;
+                      while ((match = citationPattern.exec(last.content)) !== null) {
+                        // Parse all numbers from the match
+                        const nums = match[0].match(/\d+/g);
+                        nums?.forEach((n) => cited.add(parseInt(n, 10)));
+                      }
+                      const citedSources = cited.size > 0
+                        ? sourcesRef.current.filter((s) => cited.has(s.index))
+                        : sourcesRef.current;
+                      // Deduplicate by documentId — keep first (highest-ranked) per document
+                      const seen = new Set<string>();
+                      const dedupedSources = citedSources.filter((s) => {
+                        if (seen.has(s.documentId)) return false;
+                        seen.add(s.documentId);
+                        return true;
+                      });
                       return [
                         ...prev.slice(0, -1),
-                        { ...last, sources: currentSources, id: data.data?.messageId },
+                        { ...last, sources: dedupedSources, id: data.data?.messageId },
                       ];
                     }
                     return prev;
@@ -201,7 +228,7 @@ export function useChat({ projectId, onSessionCreated }: UseChatOptions) {
         setStatus("");
       }
     },
-    [isLoading, sessionId, projectId, currentSources, onSessionCreated]
+    [isLoading, sessionId, projectId, onSessionCreated]
   );
 
   const loadSession = useCallback(

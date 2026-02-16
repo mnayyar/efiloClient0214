@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2 } from "lucide-react";
+import { FolderOpen, Layers, Globe, Send, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+type ChatScope = "PROJECT" | "CROSS_PROJECT" | "WORLD";
 
 interface ChatInputProps {
   onSend: (
     query: string,
-    options?: { scope?: "PROJECT" | "CROSS_PROJECT" }
+    options?: { scope?: ChatScope }
   ) => void;
   isLoading: boolean;
   initialValue?: string;
@@ -15,7 +17,7 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, isLoading, initialValue }: ChatInputProps) {
   const [value, setValue] = useState(initialValue ?? "");
-  const [scope, setScope] = useState<"PROJECT" | "CROSS_PROJECT">("PROJECT");
+  const [scope, setScope] = useState<ChatScope>("PROJECT");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize textarea
@@ -52,28 +54,42 @@ export function ChatInput({ onSend, isLoading, initialValue }: ChatInputProps) {
     <div className="border-t border-border-card bg-card px-4 py-3">
       <div className="mx-auto max-w-3xl">
         {/* Scope toggle */}
-        <div className="mb-2 flex items-center gap-1">
+        <div className="mb-2 flex items-center gap-1.5">
           <button
             onClick={() => setScope("PROJECT")}
             className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors",
               scope === "PROJECT"
                 ? "bg-brand-orange text-white"
                 : "bg-border-card text-text-secondary hover:text-text-primary"
             )}
           >
+            <FolderOpen className="h-3 w-3" />
             This Project
           </button>
           <button
             onClick={() => setScope("CROSS_PROJECT")}
             className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors",
               scope === "CROSS_PROJECT"
                 ? "bg-brand-orange text-white"
                 : "bg-border-card text-text-secondary hover:text-text-primary"
             )}
           >
+            <Layers className="h-3 w-3" />
             All Projects
+          </button>
+          <button
+            onClick={() => setScope("WORLD")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+              scope === "WORLD"
+                ? "bg-brand-orange text-white"
+                : "bg-border-card text-text-secondary hover:text-text-primary"
+            )}
+          >
+            <Globe className="h-3 w-3" />
+            World Knowledge
           </button>
         </div>
 
@@ -84,7 +100,7 @@ export function ChatInput({ onSend, isLoading, initialValue }: ChatInputProps) {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about your project documents..."
+            placeholder={scope === "WORLD" ? "Ask anything — powered by live web search..." : "Ask about your project documents..."}
             disabled={isLoading}
             rows={1}
             className="flex-1 resize-none rounded-lg border border-border-card bg-brand-off-white px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:border-brand-orange focus:outline-none focus:ring-1 focus:ring-brand-orange disabled:opacity-50"

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { SourceBadge } from "./source-badge";
 import { AlertCard } from "./alert-card";
 import { PromptPillRow } from "./prompt-pill";
@@ -218,7 +218,9 @@ export function ChatMessages({
                         <span className="rounded-full border border-border-card px-2 py-0.5 text-[11px] text-text-secondary">
                           {msg.scope === "PROJECT"
                             ? "This Project"
-                            : "All Projects"}
+                            : msg.scope === "CROSS_PROJECT"
+                              ? "All Projects"
+                              : "Web Search"}
                         </span>
                       )}
                     </div>
@@ -244,7 +246,7 @@ export function ChatMessages({
                   </div>
                 )}
 
-                {/* Sources */}
+                {/* Document sources */}
                 {msg.sources && msg.sources.length > 0 && (
                   <div>
                     <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-text-secondary">
@@ -266,6 +268,29 @@ export function ChatMessages({
                             )
                           }
                         />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Web citations */}
+                {msg.webCitations && msg.webCitations.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-text-secondary">
+                      Web Sources
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      {msg.webCitations.map((cite, idx) => (
+                        <a
+                          key={idx}
+                          href={cite.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 rounded-lg border border-border-card bg-brand-off-white px-3 py-1.5 text-xs text-text-primary transition-colors hover:border-brand-orange hover:text-brand-orange"
+                        >
+                          <ExternalLink className="h-3 w-3 shrink-0 text-text-secondary" />
+                          <span className="truncate">{cite.title}</span>
+                        </a>
                       ))}
                     </div>
                   </div>
