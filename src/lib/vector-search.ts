@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getPool } from "@/lib/db";
 import { generateEmbedding } from "@/lib/embeddings";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ const TYPE_WEIGHTS: Record<string, number> = {
   PORTFOLIO: 1.0,
 };
 
-// ─── Main Search Function ───────────────────────────────────────────────────
+// ─── Main Search Function (Hybrid: Vector + Keyword) ────────────────────────
 
 export async function vectorSearch(
   query: string,
@@ -60,19 +60,39 @@ export async function vectorSearch(
     scope,
     documentTypes,
     limit = 20,
-    threshold = 0.35,
+    threshold = 0.15,
     activeProjectId,
   } = options;
 
-  // 1. Generate query embedding
+  const pool = getPool();
+
+  // Run vector search and keyword search in parallel
+  const [vectorResults, keywordResults] = await Promise.all([
+    runVectorSearch(pool, query, { projectId, scope, documentTypes, limit, threshold }),
+    runKeywordSearch(pool, query, { projectId, scope, documentTypes, limit }),
+  ]);
+
+  // Merge results: deduplicate by chunkId, prefer vector similarity when available
+  const merged = mergeResults(vectorResults, keywordResults);
+
+  // Apply scoring
+  return applyScoring(merged, scope, activeProjectId, query);
+}
+
+// ─── Vector Search ──────────────────────────────────────────────────────────
+
+async function runVectorSearch(
+  pool: ReturnType<typeof getPool>,
+  query: string,
+  opts: { projectId?: string; scope: string; documentTypes?: string[]; limit: number; threshold: number }
+): Promise<RawResult[]> {
   const queryEmbedding = await generateEmbedding(query);
   const embeddingStr = `[${queryEmbedding.join(",")}]`;
 
-  // 2. Build pgvector query
   let sql: string;
-  const params: unknown[] = [embeddingStr, threshold];
+  const params: unknown[] = [embeddingStr, opts.threshold];
 
-  if (scope === "PROJECT" && projectId) {
+  if (opts.scope === "PROJECT" && opts.projectId) {
     sql = `
       SELECT dc.id as "chunkId", dc.content, dc."pageNumber", dc."sectionRef", dc.metadata,
              d.id as "documentId", d.name as "documentName", d.type as "documentType",
@@ -84,7 +104,7 @@ export async function vectorSearch(
         AND d.status = 'READY'
         AND 1 - (dc.embedding <=> $1::vector) > $2
     `;
-    params.push(projectId);
+    params.push(opts.projectId);
   } else {
     sql = `
       SELECT dc.id as "chunkId", dc.content, dc."pageNumber", dc."sectionRef", dc.metadata,
@@ -99,22 +119,94 @@ export async function vectorSearch(
     `;
   }
 
-  // Document type filter
-  if (documentTypes && documentTypes.length > 0) {
-    params.push(documentTypes);
+  if (opts.documentTypes && opts.documentTypes.length > 0) {
+    params.push(opts.documentTypes);
     sql += ` AND d.type = ANY($${params.length}::text[])`;
   }
 
-  sql += ` ORDER BY dc.embedding <=> $1::vector LIMIT ${limit}`;
+  sql += ` ORDER BY dc.embedding <=> $1::vector LIMIT ${opts.limit}`;
 
-  // 3. Execute query
-  const rawResults = (await prisma.$queryRawUnsafe(
-    sql,
-    ...params
-  )) as RawResult[];
+  const result = await pool.query(sql, params);
+  return result.rows as RawResult[];
+}
 
-  // 4. Apply scoring
-  return applyScoring(rawResults, scope, activeProjectId);
+// ─── Keyword Search ─────────────────────────────────────────────────────────
+
+async function runKeywordSearch(
+  pool: ReturnType<typeof getPool>,
+  query: string,
+  opts: { projectId?: string; scope: string; documentTypes?: string[]; limit: number }
+): Promise<RawResult[]> {
+  // Build search terms: use the full query as a phrase, plus individual words (3+ chars)
+  const words = query.split(/\s+/).filter((w) => w.length >= 3);
+  if (words.length === 0) return [];
+
+  // Search for the full phrase first, then individual words
+  const likePattern = `%${query.replace(/[%_]/g, "")}%`;
+
+  let sql: string;
+  const params: unknown[] = [likePattern];
+
+  if (opts.scope === "PROJECT" && opts.projectId) {
+    sql = `
+      SELECT dc.id as "chunkId", dc.content, dc."pageNumber", dc."sectionRef", dc.metadata,
+             d.id as "documentId", d.name as "documentName", d.type as "documentType",
+             d."projectId", dc."createdAt",
+             0.5 as similarity
+      FROM "DocumentChunk" dc
+      JOIN "Document" d ON dc."documentId" = d.id
+      WHERE d."projectId" = $2
+        AND d.status = 'READY'
+        AND dc.content ILIKE $1
+    `;
+    params.push(opts.projectId);
+  } else {
+    sql = `
+      SELECT dc.id as "chunkId", dc.content, dc."pageNumber", dc."sectionRef", dc.metadata,
+             d.id as "documentId", d.name as "documentName", d.type as "documentType",
+             d."projectId", p.name as "projectName", dc."createdAt",
+             0.5 as similarity
+      FROM "DocumentChunk" dc
+      JOIN "Document" d ON dc."documentId" = d.id
+      JOIN "Project" p ON d."projectId" = p.id
+      WHERE d.status = 'READY'
+        AND dc.content ILIKE $1
+    `;
+  }
+
+  if (opts.documentTypes && opts.documentTypes.length > 0) {
+    params.push(opts.documentTypes);
+    sql += ` AND d.type = ANY($${params.length}::text[])`;
+  }
+
+  sql += ` LIMIT ${opts.limit}`;
+
+  const result = await pool.query(sql, params);
+  return result.rows as RawResult[];
+}
+
+// ─── Merge Results ──────────────────────────────────────────────────────────
+
+function mergeResults(
+  vectorResults: RawResult[],
+  keywordResults: RawResult[]
+): RawResult[] {
+  const seen = new Map<string, RawResult>();
+
+  // Vector results take priority (real similarity scores)
+  for (const r of vectorResults) {
+    seen.set(r.chunkId, r);
+  }
+
+  // Add keyword results that weren't found by vector search
+  // Give keyword-only matches a base similarity of 0.5 (they contain the exact text)
+  for (const r of keywordResults) {
+    if (!seen.has(r.chunkId)) {
+      seen.set(r.chunkId, r);
+    }
+  }
+
+  return Array.from(seen.values());
 }
 
 // ─── Scoring Algorithm ──────────────────────────────────────────────────────
@@ -122,12 +214,29 @@ export async function vectorSearch(
 function applyScoring(
   results: RawResult[],
   scope: "PROJECT" | "CROSS_PROJECT",
-  activeProjectId?: string
+  activeProjectId: string | undefined,
+  query: string
 ): ScoredResult[] {
   const now = Date.now();
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter((w) => w.length >= 3);
 
   const scored: ScoredResult[] = results.map((r) => {
-    const baseScore = Number(r.similarity);
+    let baseScore = Number(r.similarity);
+
+    // Keyword boost: if the chunk contains query terms, boost the score
+    const contentLower = r.content.toLowerCase();
+    const hasExactPhrase = contentLower.includes(queryLower);
+    const matchingWords = queryWords.filter((w) => contentLower.includes(w));
+    const wordMatchRatio = queryWords.length > 0 ? matchingWords.length / queryWords.length : 0;
+
+    if (hasExactPhrase) {
+      // Exact phrase match — strong boost
+      baseScore = Math.max(baseScore, 0.70);
+    } else if (wordMatchRatio >= 0.5) {
+      // Partial word match — moderate boost
+      baseScore = Math.max(baseScore, 0.40 + wordMatchRatio * 0.2);
+    }
 
     // Type weight
     const typeWeight = TYPE_WEIGHTS[r.documentType] ?? 1.0;
@@ -143,12 +252,12 @@ function applyScoring(
         : 1.0;
 
     const finalScore = baseScore * typeWeight * recencyBoost * scopeWeight;
-    const isMarginally = baseScore >= 0.35 && baseScore < 0.50;
+    const isMarginally = baseScore >= 0.15 && baseScore < 0.40;
 
-    return { ...r, finalScore, isMarginally };
+    return { ...r, similarity: baseScore, finalScore, isMarginally };
   });
 
-  // 5. Diversity filtering
+  // Diversity filtering
   return applyDiversityFilter(scored);
 }
 
