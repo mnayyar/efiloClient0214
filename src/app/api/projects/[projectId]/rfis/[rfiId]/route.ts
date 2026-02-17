@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth";
 import { rateLimitGeneral } from "@/lib/rate-limit";
 import { Prisma } from "@prisma/client";
+import { inngest } from "@/lib/inngest";
 
 const updateRfiSchema = z.object({
   subject: z.string().min(1).max(500).optional(),
@@ -124,6 +125,18 @@ export async function PATCH(
       where: { id: rfiId },
       data,
     });
+
+    // If coFlag was just set to true, trigger compliance deadline check
+    if (
+      parsed.data.coFlag === true &&
+      !existing.coFlag &&
+      updated.coFlag
+    ) {
+      await inngest.send({
+        name: "compliance/rfi-check",
+        data: { rfiId, triggeredBy: user.id },
+      });
+    }
 
     return NextResponse.json({ data: updated });
   } catch (error) {

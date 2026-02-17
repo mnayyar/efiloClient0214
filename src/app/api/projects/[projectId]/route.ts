@@ -37,6 +37,50 @@ const updateProjectSchema = z.object({
   ownerPhone: z.string().max(50).nullish(),
 });
 
+// GET /api/projects/[projectId] — Fetch single project
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  try {
+    const user = await requireAuth(request);
+
+    if (!rateLimitGeneral(user.id)) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        { status: 429 }
+      );
+    }
+
+    const { projectId } = await params;
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        _count: { select: { documents: true, rfis: true } },
+      },
+    });
+
+    if (!project) {
+      return NextResponse.json(
+        { error: "Project not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ data: project });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    console.error("Get project error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
 // PATCH /api/projects/[projectId] — Update project
 export async function PATCH(
   request: NextRequest,

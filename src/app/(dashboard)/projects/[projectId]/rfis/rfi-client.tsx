@@ -19,6 +19,10 @@ import {
   Mail,
   DollarSign,
   Activity,
+  Building2,
+  User,
+  Pencil,
+  Check,
 } from "lucide-react";
 import {
   BarChart,
@@ -81,6 +85,12 @@ interface ProjectDocument {
   name: string;
   type: string;
   status: string;
+}
+
+interface ProjectInfo {
+  gcCompanyName: string | null;
+  gcContactName: string | null;
+  gcContactEmail: string | null;
 }
 
 interface RfiClientProps {
@@ -237,7 +247,7 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
             label="Potential CO"
             value={(() => {
               const co = (allRfis ?? []).filter((r) => r.coFlag);
-              return co.length > 0 ? `$${co.reduce((s, r) => s + (r.coEstimate ?? 0), 0).toLocaleString()} (${co.length})` : "None";
+              return co.length > 0 ? String(co.length) : "None";
             })()}
             accent={(allRfis ?? []).some((r) => r.coFlag) ? "text-amber-600" : "text-text-secondary"}
             bg="bg-amber-50 dark:bg-amber-950/20"
@@ -413,7 +423,6 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
                   <th className="px-4 py-3 text-left font-medium text-text-secondary">Subject</th>
                   <th className="px-4 py-3 text-left font-medium text-text-secondary">Status</th>
                   <th className="px-4 py-3 text-left font-medium text-text-secondary">Priority</th>
-                  <th className="hidden px-4 py-3 text-left font-medium text-text-secondary md:table-cell">Assigned To</th>
                   <th className="hidden px-4 py-3 text-left font-medium text-text-secondary lg:table-cell">Due Date</th>
                   <th className="hidden px-4 py-3 text-left font-medium text-text-secondary sm:table-cell">Created</th>
                   <th className="px-4 py-3 text-right font-medium text-text-secondary"><span className="sr-only">Actions</span></th>
@@ -451,7 +460,6 @@ export function RfiPageClient({ projectId }: RfiClientProps) {
                         {rfi.priority}
                       </span>
                     </td>
-                    <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{rfi.assignedTo || "—"}</td>
                     <td className="hidden px-4 py-3 lg:table-cell">
                       {rfi.dueDate ? (
                         <span className={cn("flex items-center gap-1 text-text-secondary", rfi.isOverdue && "text-red-500 font-medium")}>
@@ -639,17 +647,18 @@ function RfiDashboard({
                     borderRadius: 6,
                     border: "1px solid #E8E5DE",
                   }}
-                  formatter={(value: number) => [value, "RFIs"]}
+                  formatter={(value) => [String(value ?? 0), "RFIs"]}
                 />
                 <Bar
                   dataKey="count"
                   radius={[4, 4, 0, 0]}
-                  onClick={(data) => {
-                    if (!data || data.count === 0) return;
-                    const idx = stats.aging.findIndex((a) => a.label === data.label);
+                  onClick={(_data, _index, e) => {
+                    const d = _data as unknown as { count: number; label: string; max: number };
+                    if (!d || d.count === 0) return;
+                    const idx = stats.aging.findIndex((a) => a.label === d.label);
                     const minDays = idx === 0 ? 0 : AGING_BRACKETS[idx - 1].max + 1;
-                    const maxDays = data.max === Infinity ? 99999 : data.max;
-                    onFilter({ type: "aging", minDays, maxDays, label: `Aging: ${data.label}` });
+                    const maxDays = d.max === Infinity ? 99999 : d.max;
+                    onFilter({ type: "aging", minDays, maxDays, label: `Aging: ${d.label}` });
                   }}
                 >
                   {stats.aging.map((entry, i) => {
@@ -772,11 +781,25 @@ function CreateRfiDialog({
   const [subject, setSubject] = useState("");
   const [question, setQuestion] = useState("");
   const [priority, setPriority] = useState("MEDIUM");
-  const [assignedTo, setAssignedTo] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [showDocPicker, setShowDocPicker] = useState(false);
   const [aiDraft, setAiDraft] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState(false);
+  const [draftEditText, setDraftEditText] = useState("");
+  const [sendAfterCreate, setSendAfterCreate] = useState(false);
+
+  // Fetch project info for GC contact display
+  const { data: projectInfo } = useQuery({
+    queryKey: ["project-info", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.data as ProjectInfo;
+    },
+    enabled: open,
+  });
 
   // Fetch project documents for linking
   const { data: documents } = useQuery({
@@ -791,15 +814,15 @@ function CreateRfiDialog({
   });
 
   const readyDocs = (documents ?? []).filter((d) => d.status === "READY");
+  const hasGcEmail = !!projectInfo?.gcContactEmail;
 
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ andSend }: { andSend: boolean }) => {
       const body: Record<string, unknown> = {
         subject,
         question,
         priority,
       };
-      if (assignedTo.trim()) body.assignedTo = assignedTo.trim();
       if (dueDate) body.dueDate = new Date(dueDate).toISOString();
       if (selectedDocIds.length > 0) body.sourceDocIds = selectedDocIds;
 
@@ -814,10 +837,28 @@ function CreateRfiDialog({
         throw new Error(err.error || "Failed to create RFI");
       }
 
-      return res.json();
+      const data = await res.json();
+
+      // If user wants to send immediately, send the email
+      if (andSend && data.data?.id) {
+        const sendRes = await fetch(
+          `/api/projects/${projectId}/rfis/${data.data.id}/send-email`,
+          { method: "POST" }
+        );
+        if (!sendRes.ok) {
+          const sendErr = await sendRes.json();
+          throw new Error(sendErr.error || "RFI created but email failed to send");
+        }
+      }
+
+      return { ...data, wasSent: andSend };
     },
-    onSuccess: () => {
-      toast.success("RFI created successfully");
+    onSuccess: (data) => {
+      toast.success(
+        data.wasSent
+          ? "RFI created and sent to GC"
+          : "RFI created as draft"
+      );
       onCreated();
       onOpenChange(false);
       resetForm();
@@ -838,7 +879,6 @@ function CreateRfiDialog({
             subject,
             question,
             priority,
-            assignedTo: assignedTo.trim() || undefined,
             sourceDocIds: selectedDocIds,
           }),
         }
@@ -851,6 +891,8 @@ function CreateRfiDialog({
     },
     onSuccess: (data) => {
       setAiDraft(data.data.draft);
+      setEditingDraft(false);
+      setDraftEditText("");
       toast.success("AI draft generated");
     },
     onError: (err: Error) => {
@@ -862,11 +904,13 @@ function CreateRfiDialog({
     setSubject("");
     setQuestion("");
     setPriority("MEDIUM");
-    setAssignedTo("");
     setDueDate("");
     setSelectedDocIds([]);
     setShowDocPicker(false);
     setAiDraft(null);
+    setEditingDraft(false);
+    setDraftEditText("");
+    setSendAfterCreate(false);
   }
 
   return (
@@ -885,10 +929,39 @@ function CreateRfiDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* GC Contact Info */}
+        {projectInfo && (projectInfo.gcCompanyName || projectInfo.gcContactName || projectInfo.gcContactEmail) && (
+          <div className="rounded-md border border-border-card bg-brand-off-white/50 px-3 py-2 dark:bg-muted/30">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+              Sending To
+            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-primary">
+              {projectInfo.gcCompanyName && (
+                <span className="flex items-center gap-1">
+                  <Building2 className="h-3 w-3 text-text-secondary" />
+                  {projectInfo.gcCompanyName}
+                </span>
+              )}
+              {projectInfo.gcContactName && (
+                <span className="flex items-center gap-1">
+                  <User className="h-3 w-3 text-text-secondary" />
+                  {projectInfo.gcContactName}
+                </span>
+              )}
+              {projectInfo.gcContactEmail && (
+                <span className="flex items-center gap-1">
+                  <Mail className="h-3 w-3 text-text-secondary" />
+                  {projectInfo.gcContactEmail}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            createMutation.mutate();
+            createMutation.mutate({ andSend: false });
           }}
           className="flex flex-col gap-4 pt-2"
         >
@@ -937,66 +1010,111 @@ function CreateRfiDialog({
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             />
 
-            {/* AI Draft preview */}
+            {/* AI Draft preview / edit */}
             {aiDraft && (
               <div className="rounded-md border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/20">
-                <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-purple-600">
-                  <Sparkles className="h-3 w-3" />
-                  AI-Generated Draft
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-purple-600">
+                    <Sparkles className="h-3 w-3" />
+                    AI-Generated Draft
+                  </span>
+                  {!editingDraft && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-[11px] text-purple-600 hover:text-purple-700"
+                      onClick={() => {
+                        setDraftEditText(aiDraft);
+                        setEditingDraft(true);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
                 </div>
-                <div className="prose prose-sm max-w-none text-text-primary prose-strong:text-text-primary prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
-                  <Markdown remarkPlugins={[remarkGfm]}>{aiDraft}</Markdown>
-                </div>
-                <div className="mt-2 flex gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => {
-                      setQuestion(aiDraft);
-                      setAiDraft(null);
-                    }}
-                  >
-                    Use This Draft
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-text-secondary"
-                    onClick={() => setAiDraft(null)}
-                  >
-                    Dismiss
-                  </Button>
-                </div>
+                {editingDraft ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={draftEditText}
+                      onChange={(e) => setDraftEditText(e.target.value)}
+                      rows={8}
+                      className="w-full rounded-md border border-purple-300 bg-white px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500/30 dark:bg-background"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setQuestion(draftEditText);
+                          setAiDraft(null);
+                          setEditingDraft(false);
+                          setDraftEditText("");
+                        }}
+                      >
+                        Use Edited Draft
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-text-secondary"
+                        onClick={() => {
+                          setEditingDraft(false);
+                          setDraftEditText("");
+                        }}
+                      >
+                        Cancel Edit
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="prose prose-sm max-w-none text-text-primary prose-strong:text-text-primary prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                      <Markdown remarkPlugins={[remarkGfm]}>{aiDraft}</Markdown>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setQuestion(aiDraft);
+                          setAiDraft(null);
+                        }}
+                      >
+                        Use This Draft
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-text-secondary"
+                        onClick={() => setAiDraft(null)}
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
 
-          {/* Priority + Assigned To row */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label>Priority</Label>
-              <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <SelectItem key={p} value={p}>{p}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="rfi-assigned">Assigned To</Label>
-              <Input
-                id="rfi-assigned"
-                value={assignedTo}
-                onChange={(e) => setAssignedTo(e.target.value)}
-                placeholder="Name or company"
-              />
-            </div>
+          {/* Priority */}
+          <div className="flex flex-col gap-1.5">
+            <Label>Priority</Label>
+            <Select value={priority} onValueChange={setPriority}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRIORITY_OPTIONS.map((p) => (
+                  <SelectItem key={p} value={p}>{p}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Due Date */}
@@ -1097,7 +1215,7 @@ function CreateRfiDialog({
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex items-center justify-end gap-2 pt-2">
             <Button
               type="button"
               variant="outline"
@@ -1107,12 +1225,29 @@ function CreateRfiDialog({
             </Button>
             <Button
               type="submit"
+              variant="outline"
               disabled={createMutation.isPending || !subject.trim() || !question.trim()}
             >
-              {createMutation.isPending && (
+              {createMutation.isPending && !sendAfterCreate && (
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
               )}
-              Create RFI
+              Save as Draft
+            </Button>
+            <Button
+              type="button"
+              disabled={createMutation.isPending || !subject.trim() || !question.trim() || !hasGcEmail}
+              title={!hasGcEmail ? "Add GC contact email in Project Settings first" : undefined}
+              onClick={() => {
+                setSendAfterCreate(true);
+                createMutation.mutate({ andSend: true });
+              }}
+            >
+              {createMutation.isPending && sendAfterCreate ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Mail className="mr-1.5 h-4 w-4" />
+              )}
+              Create & Send
             </Button>
           </div>
         </form>
@@ -1135,8 +1270,23 @@ function RfiDetailDialog({
   onUpdated: () => void;
 }) {
   const [editingStatus, setEditingStatus] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editQuestion, setEditQuestion] = useState("");
   const [responseText, setResponseText] = useState("");
   const [showResponseInput, setShowResponseInput] = useState(false);
+
+  // Fetch project info for GC contact display
+  const { data: projectInfo } = useQuery({
+    queryKey: ["project-info", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.data as ProjectInfo;
+    },
+    enabled: !!rfi,
+  });
 
   // Fetch linked document names
   const { data: linkedDocs } = useQuery({
@@ -1153,7 +1303,13 @@ function RfiDetailDialog({
   });
 
   const updateMutation = useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
+    mutationFn: async ({
+      data,
+      keepOpen,
+    }: {
+      data: Record<string, unknown>;
+      keepOpen?: boolean;
+    }) => {
       const res = await fetch(
         `/api/projects/${projectId}/rfis/${rfi!.id}`,
         {
@@ -1166,12 +1322,15 @@ function RfiDetailDialog({
         const err = await res.json();
         throw new Error(err.error || "Failed to update RFI");
       }
-      return res.json();
+      return { json: await res.json(), keepOpen };
     },
-    onSuccess: () => {
+    onSuccess: ({ keepOpen }) => {
       toast.success("RFI updated");
       onUpdated();
-      onClose();
+      setEditingQuestion(false);
+      setEditSubject("");
+      setEditQuestion("");
+      if (!keepOpen) onClose();
     },
     onError: (err: Error) => {
       toast.error(err.message);
@@ -1284,7 +1443,6 @@ function RfiDetailDialog({
           </DialogTitle>
           <DialogDescription>
             Created {formatDate(rfi.createdAt)}
-            {rfi.assignedTo && ` · Assigned to ${rfi.assignedTo}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -1313,6 +1471,35 @@ function RfiDetailDialog({
             )}
           </div>
 
+          {/* GC Contact Info */}
+          {projectInfo && (projectInfo.gcCompanyName || projectInfo.gcContactName || projectInfo.gcContactEmail) && (
+            <div className="rounded-md border border-border-card bg-brand-off-white/50 px-3 py-2 dark:bg-muted/30">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+                {rfi.status === "DRAFT" ? "Sending To" : "Sent To"}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-primary">
+                {projectInfo.gcCompanyName && (
+                  <span className="flex items-center gap-1">
+                    <Building2 className="h-3 w-3 text-text-secondary" />
+                    {projectInfo.gcCompanyName}
+                  </span>
+                )}
+                {projectInfo.gcContactName && (
+                  <span className="flex items-center gap-1">
+                    <User className="h-3 w-3 text-text-secondary" />
+                    {projectInfo.gcContactName}
+                  </span>
+                )}
+                {projectInfo.gcContactEmail && (
+                  <span className="flex items-center gap-1">
+                    <Mail className="h-3 w-3 text-text-secondary" />
+                    {projectInfo.gcContactEmail}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Linked Documents */}
           {linkedDocs && linkedDocs.length > 0 && (
             <div>
@@ -1339,26 +1526,103 @@ function RfiDetailDialog({
               <h4 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                 Question
               </h4>
-              {rfi.status === "DRAFT" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 text-[11px] text-purple-600 hover:text-purple-700"
-                  onClick={() => aiDraftMutation.mutate()}
-                  disabled={aiDraftMutation.isPending}
-                >
-                  {aiDraftMutation.isPending ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                  AI Draft
-                </Button>
-              )}
+              <div className="flex items-center gap-1">
+                {(rfi.status === "DRAFT" || rfi.status === "SUBMITTED") && !editingQuestion && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 text-[11px] text-text-secondary hover:text-text-primary"
+                    onClick={() => {
+                      setEditSubject(rfi.subject);
+                      setEditQuestion(rfi.question);
+                      setEditingQuestion(true);
+                    }}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit
+                  </Button>
+                )}
+                {rfi.status === "DRAFT" && !editingQuestion && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 text-[11px] text-purple-600 hover:text-purple-700"
+                    onClick={() => aiDraftMutation.mutate()}
+                    disabled={aiDraftMutation.isPending}
+                  >
+                    {aiDraftMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    AI Draft
+                  </Button>
+                )}
+              </div>
             </div>
-            <p className="whitespace-pre-wrap rounded-md border border-border-card bg-brand-off-white p-3 text-sm text-text-primary dark:bg-muted">
-              {rfi.question}
-            </p>
+            {editingQuestion ? (
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="edit-subject" className="text-xs">Subject</Label>
+                  <Input
+                    id="edit-subject"
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="edit-question" className="text-xs">Question</Label>
+                  <textarea
+                    id="edit-question"
+                    value={editQuestion}
+                    onChange={(e) => setEditQuestion(e.target.value)}
+                    rows={6}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    disabled={
+                      !editSubject.trim() ||
+                      !editQuestion.trim() ||
+                      (editSubject === rfi.subject && editQuestion === rfi.question) ||
+                      updateMutation.isPending
+                    }
+                    onClick={() => {
+                      const updates: Record<string, unknown> = {};
+                      if (editSubject !== rfi.subject) updates.subject = editSubject;
+                      if (editQuestion !== rfi.question) updates.question = editQuestion;
+                      updateMutation.mutate({ data: updates, keepOpen: true });
+                    }}
+                  >
+                    {updateMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Check className="h-3 w-3" />
+                    )}
+                    Save Changes
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setEditingQuestion(false);
+                      setEditSubject("");
+                      setEditQuestion("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="whitespace-pre-wrap rounded-md border border-border-card bg-brand-off-white p-3 text-sm text-text-primary dark:bg-muted">
+                {rfi.question}
+              </p>
+            )}
           </div>
 
           {/* AI Draft Question */}
@@ -1382,7 +1646,7 @@ function RfiDetailDialog({
                   size="sm"
                   className="h-6 text-[11px] text-brand-orange"
                   onClick={() => {
-                    updateMutation.mutate({ question: rfi.aiDraftQuestion });
+                    updateMutation.mutate({ data: { question: rfi.aiDraftQuestion }, keepOpen: true });
                   }}
                   disabled={updateMutation.isPending}
                 >
@@ -1446,8 +1710,7 @@ function RfiDetailDialog({
                       disabled={!responseText.trim() || updateMutation.isPending}
                       onClick={() => {
                         updateMutation.mutate({
-                          response: responseText,
-                          status: "ANSWERED",
+                          data: { response: responseText, status: "ANSWERED" },
                         });
                       }}
                     >
@@ -1502,7 +1765,7 @@ function RfiDetailDialog({
               <Select
                 value={rfi.status}
                 onValueChange={(v) => {
-                  updateMutation.mutate({ status: v });
+                  updateMutation.mutate({ data: { status: v } });
                   setEditingStatus(false);
                 }}
               >

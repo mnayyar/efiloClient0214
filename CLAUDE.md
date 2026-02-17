@@ -213,3 +213,112 @@ We are building **Release 1: MVP (Capabilities 1-4)**. See `docs/phases/` for st
 - `docs/AI_SERVICE.md` — AI service patterns and token budgets
 - `docs/SEARCH.md` — Search scoring, retrieval, and ranking logic
 - `docs/phases/` — Phase-by-phase build prompts
+
+
+
+---
+
+## Capability 3: Compliance Engine Implementation
+
+### CRITICAL: Existing Models Warning
+
+**This project has compliance-related models already built.** Before implementing anything:
+
+1. Read `prisma/schema.prisma` to understand existing models
+2. Identify what's already built vs what's missing
+3. Enhance existing models - do NOT create duplicates
+4. Preserve all existing functionality
+
+### Existing Models (DO NOT RECREATE)
+
+| Model | Status | Action |
+|-------|--------|--------|
+| `ContractClause` | Exists (~line 467) | Enhance with new fields if needed |
+| `ComplianceNotice` | Exists (~line 523) | Enhance with delivery tracking fields |
+| `ComplianceScore` | Exists (~line 547) | Enhance with streak/claims tracking |
+| `ChangeEvent` | Exists (~line 611) | Use for integration (no changes) |
+| `RFI` | Exists (~line 488) | Use for integration (no changes) |
+| `Project` | Exists (~line 302) | Add new relations only |
+
+**Existing enums:** `ComplianceNoticeType`, `ComplianceNoticeStatus`, `ContractClauseKind`, `ContractClauseMethod`, `DeadlineType`
+
+### Models to ADD (These are Missing)
+
+| Model | Purpose |
+|-------|---------|
+| `ComplianceDeadline` | **Critical** - Ticking clock countdown tracking |
+| `ComplianceScoreHistory` | Score trending over time |
+| `ComplianceAuditLog` | Audit trail for compliance actions |
+| `ProjectHoliday` | Business day calculations |
+| `MeasuredMileDimension` | Productivity impact (Release 1.5) |
+
+### Enums to ADD (These are Missing)
+
+| Enum | Purpose |
+|------|---------|
+| `DeadlineStatus` | ACTIVE, NOTICE_DRAFTED, NOTICE_SENT, COMPLETED, EXPIRED, WAIVED |
+| `Severity` | LOW, INFO, WARNING, CRITICAL, EXPIRED |
+| `TriggerEventType` | CHANGE_ORDER, RFI, SCHEDULE_DELAY, DISCOVERY, etc. |
+
+### Business Context
+
+The Compliance Engine is efilo's **crown jewel differentiator**:
+- One missed notice deadline = forfeited claims rights ($50K-$500K average)
+- Industry misses ~40% of contractual notice deadlines
+- Efilo targets 100% on-time notice delivery, protecting $2M+ per project
+
+### Core Domain Concepts
+
+**Deadline Severity Classification:**
+```
+CRITICAL: <= 3 days remaining (RED - push + email + in-app)
+WARNING:  3-7 days remaining (ORANGE - email + in-app)
+INFO:     7-14 days remaining (BLUE - in-app only)
+LOW:      > 14 days remaining (GRAY - no alert)
+EXPIRED:  Past deadline (RED - escalate to executive)
+```
+
+**Key Metrics:**
+- **Compliance Score**: (onTimeCount / totalCount) × 100
+- **Current Streak**: Consecutive notices sent before deadline
+- **Protected Claims Value**: Dollar value preserved through timely notices
+
+### Implementation Phases
+
+| Phase | File | Description |
+|-------|------|-------------|
+| 1 | `COMPLIANCE_PHASE1_DATABASE.md` | Enhance schema, add missing models |
+| 2 | `COMPLIANCE_PHASE2_PARSING.md` | Contract clause extraction with AI |
+| 3 | `COMPLIANCE_PHASE3_DEADLINES.md` | Deadline calculation engine |
+| 4 | `COMPLIANCE_PHASE4_NOTICES.md` | Notice generation and delivery |
+| 5 | `COMPLIANCE_PHASE5_DASHBOARD.md` | Scoring, alerts, dashboard |
+| 6 | `COMPLIANCE_PHASE6_INTEGRATION.md` | Connect to RFI, search, project health |
+
+### Compliance File Organization
+
+```
+src/
+├── services/
+│   └── compliance/
+│       ├── parsing/          # Contract clause extraction
+│       ├── deadlines/        # Deadline calculation
+│       ├── notices/          # Notice management
+│       ├── scoring/          # Compliance metrics
+│       └── alerts/           # Notification system
+├── app/
+│   └── (dashboard)/
+│       └── projects/
+│           └── [projectId]/
+│               └── compliance/   # Compliance UI pages
+└── components/
+    └── compliance/           # React components
+```
+
+### Golden Rules for Compliance Engine
+
+1. **ALWAYS check existing schema** before creating models
+2. **ENHANCE existing models** - don't duplicate
+3. **All new fields should be optional** (nullable) to avoid breaking existing data
+4. **Test existing functionality** after schema changes
+5. **Use existing enums** where they match (e.g., existing `DeadlineType`)
+

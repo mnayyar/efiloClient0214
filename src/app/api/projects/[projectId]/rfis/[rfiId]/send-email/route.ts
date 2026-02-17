@@ -66,13 +66,14 @@ export async function POST(
       );
     }
 
-    // Send email
+    // Send email — CC the sender so they have a copy
     await sendRfiEmail({
       fromName: `${user.name} via ${org.name}`,
       fromEmail: org.replyToDomain,
       replyTo: user.email,
       to: project.gcContactEmail,
       toName: project.gcContactName ?? undefined,
+      cc: user.email,
       rfiNumber: rfi.rfiNumber,
       subject: rfi.subject,
       question: rfi.question,

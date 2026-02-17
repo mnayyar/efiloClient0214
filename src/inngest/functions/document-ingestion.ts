@@ -103,12 +103,45 @@ export const documentIngestion = inngest.createFunction(
     });
 
     // Step 6: Update document status to READY
-    await step.run("finalize", async () => {
-      await prisma.document.update({
+    const document = await step.run("finalize", async () => {
+      const doc = await prisma.document.update({
         where: { id: documentId },
         data: { status: "READY", pageCount: extracted.pageCount },
       });
+      return { type: doc.type, projectId: doc.projectId };
     });
+
+    // Step 7: If this is a CONTRACT, auto-parse for compliance clauses
+    if (document.type === "CONTRACT") {
+      await step.run("parse-compliance-clauses", async () => {
+        const { parseContract } = await import(
+          "@/services/compliance/parser"
+        );
+
+        // Check if clauses already exist for this doc (idempotency)
+        const existing = await prisma.contractClause.count({
+          where: { sourceDocId: documentId },
+        });
+        if (existing > 0) return { skipped: true, existing };
+
+        // Only parse if we have enough text
+        if (extracted.text.trim().length < 100) {
+          return { skipped: true, reason: "Insufficient text" };
+        }
+
+        const result = await parseContract({
+          projectId: document.projectId,
+          documentId,
+          contractText: extracted.text,
+        });
+
+        return {
+          clausesCreated: result.clauses.length,
+          requiresReview: result.requiresReviewCount,
+          contractType: result.contractType,
+        };
+      });
+    }
 
     return { documentId, chunksCreated: chunks.length };
   }

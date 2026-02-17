@@ -16,6 +16,7 @@ const defaultFrom =
 interface SendEmailParams {
   to: string;
   toName?: string;
+  cc?: string;
   from?: string;
   fromName?: string;
   replyTo?: string;
@@ -44,6 +45,7 @@ export async function sendEmail(params: SendEmailParams) {
   await transporter.sendMail({
     from,
     to,
+    cc: params.cc,
     replyTo: params.replyTo,
     subject: params.subject,
     html: params.html,
@@ -57,6 +59,7 @@ interface SendRfiEmailParams {
   replyTo: string;
   to: string;
   toName?: string;
+  cc?: string;
   rfiNumber: string;
   subject: string;
   question: string;
@@ -97,6 +100,7 @@ ${escapeHtml(params.question)}
   await sendEmail({
     to: params.to,
     toName: params.toName,
+    cc: params.cc,
     from: params.fromEmail,
     fromName: params.fromName,
     replyTo: params.replyTo,

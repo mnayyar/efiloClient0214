@@ -242,6 +242,43 @@ enum DeadlineType {
   HOURS
 }
 
+enum DeadlineStatus {
+  ACTIVE
+  NOTICE_DRAFTED
+  NOTICE_SENT
+  COMPLETED
+  EXPIRED
+  WAIVED
+}
+
+enum Severity {
+  LOW
+  INFO
+  WARNING
+  CRITICAL
+  EXPIRED
+}
+
+enum TriggerEventType {
+  CHANGE_ORDER
+  RFI
+  SCHEDULE_DELAY
+  DISCOVERY
+  DIRECTIVE
+  CLAIM
+  DEFECT
+  OTHER
+}
+
+enum DeliveryMethod {
+  EMAIL
+  CERTIFIED_MAIL
+  REGISTERED_MAIL
+  HAND_DELIVERY
+  FAX
+  COURIER
+}
+
 enum AuthMethod {
   SSO
   EMAIL_PASSWORD
@@ -343,6 +380,12 @@ model Project {
   retentionTrackers  RetentionTracker[]
   searchQueries      SearchQuery[]
   chatSessions       ChatSession[]
+
+  // Compliance Engine
+  complianceDeadlines    ComplianceDeadline[]
+  complianceScoreHistory ComplianceScoreHistory[]
+  complianceAuditLogs    ComplianceAuditLog[]
+  projectHolidays        ProjectHoliday[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -479,6 +522,26 @@ model ContractClause {
   aiModel      String?
   sourceDocId  String?
 
+  // Trigger definition
+  trigger String? // e.g., "Upon discovery of claim basis"
+
+  // Cure period
+  curePeriodDays Int?
+  curePeriodType DeadlineType?
+
+  // Flow-down
+  flowDownProvisions String?
+  parentClauseRef    String?
+
+  // Review status
+  requiresReview Boolean   @default(false)
+  reviewReason   String?   // AI explanation of why human review is needed
+  confirmed      Boolean   @default(false)
+  confirmedAt    DateTime?
+  confirmedBy    String?
+
+  complianceDeadlines ComplianceDeadline[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -535,6 +598,23 @@ model ComplianceNotice {
   acknowledgedAt DateTime?
   clauseId       String?
 
+  // Delivery tracking
+  deliveryMethods      String[] // Array of DeliveryMethod values
+  deliveryConfirmation Json?    // Per-method confirmation details
+  deliveredAt          DateTime?
+  onTimeStatus         Boolean? // true = on time, false = late
+
+  // AI tracking
+  generatedByAI   Boolean @default(false)
+  aiModel         String?
+  aiPromptVersion String?
+
+  // Approval workflow
+  reviewedBy String?
+  reviewedAt DateTime?
+  approvedBy String?
+  approvedAt DateTime?
+
   createdById String
 
   createdAt DateTime @default(now())
@@ -550,6 +630,26 @@ model ComplianceScore {
   project   Project @relation(fields: [projectId], references: [id])
   score     Int
   details   Json
+
+  // Streak tracking
+  currentStreak  Int       @default(0)
+  bestStreak     Int       @default(0)
+  streakBrokenAt DateTime?
+
+  // Claims value
+  protectedClaimsValue Decimal @default(0) @db.Decimal(15, 2)
+  atRiskValue          Decimal @default(0) @db.Decimal(15, 2)
+
+  // Counts
+  onTimeCount   Int @default(0)
+  totalCount    Int @default(0)
+  missedCount   Int @default(0)
+  atRiskCount   Int @default(0)
+  activeCount   Int @default(0)
+  upcomingCount Int @default(0)
+
+  // Timestamp
+  lastCalculatedAt DateTime @default(now())
 
   calculatedAt DateTime @default(now())
 
@@ -807,4 +907,114 @@ model AuditLog {
   @@index([userId, createdAt])
   @@index([entityType, entityId])
   @@index([projectId, createdAt])
+}
+
+// ─── Compliance Engine Models ───────────────────────────────────────────────
+
+model ComplianceDeadline {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Link to ContractClause
+  clauseId String
+  clause   ContractClause @relation(fields: [clauseId], references: [id])
+
+  // Trigger event details
+  triggerEventType   TriggerEventType
+  triggerEventId     String? // Reference to ChangeEvent.id or RFI.id
+  triggerDescription String
+  triggeredAt        DateTime
+  triggeredBy        String? // userId
+
+  // Calculated deadline
+  calculatedDeadline DateTime
+  deadlineTimezone   String @default("America/Los_Angeles")
+
+  // Status tracking
+  status   DeadlineStatus @default(ACTIVE)
+  severity Severity       @default(LOW)
+
+  // Notice reference
+  noticeId        String?
+  noticeCreatedAt DateTime?
+
+  // Waiver
+  waivedAt     DateTime?
+  waivedBy     String?
+  waiverReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+  @@index([severity])
+  @@index([calculatedDeadline])
+}
+
+model ProjectHoliday {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  date        DateTime @db.Date
+  name        String
+  description String?
+  recurring   Boolean  @default(false)
+  source      String   @default("MANUAL")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([date])
+  @@unique([projectId, date])
+}
+
+model ComplianceScoreHistory {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  snapshotDate         DateTime
+  compliancePercentage Decimal? @db.Decimal(5, 2)
+  onTimeCount          Int
+  totalCount           Int
+  noticesSentInPeriod  Int      @default(0)
+  protectedClaimsValue Decimal  @db.Decimal(15, 2)
+  periodType           String // "daily", "weekly", "monthly"
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([snapshotDate])
+  @@unique([projectId, snapshotDate, periodType])
+}
+
+model ComplianceAuditLog {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  eventType  String // CLAUSE_PARSED, DEADLINE_CREATED, NOTICE_SENT, etc.
+  entityType String // ComplianceDeadline, ComplianceNotice, etc.
+  entityId   String
+
+  userId    String?
+  userEmail String?
+  actorType String @default("USER") // USER, SYSTEM, AI
+
+  action  String
+  details Json?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([entityType, entityId])
+  @@index([eventType])
+  @@index([createdAt])
 }

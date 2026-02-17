@@ -1,6 +1,6 @@
 // pdf-parse v1 tries to load a test file on import — this dynamic import avoids that
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse/lib/pdf-parse") as typeof import("pdf-parse")["default"];
+const pdfParse = require("pdf-parse/lib/pdf-parse") as (dataBuffer: Buffer) => Promise<{ text: string; numpages: number; info: Record<string, unknown> }>;
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 
