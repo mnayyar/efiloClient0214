@@ -1,0 +1,276 @@
+"""All database enums — matching existing Prisma-created PostgreSQL enum types exactly."""
+
+import enum
+
+
+class UserRole(str, enum.Enum):
+    ADMIN = "ADMIN"
+    PROJECT_MANAGER = "PROJECT_MANAGER"
+    FIELD_ENGINEER = "FIELD_ENGINEER"
+    ESTIMATOR = "ESTIMATOR"
+    EXECUTIVE = "EXECUTIVE"
+    VIEWER = "VIEWER"
+
+
+class AuthMethod(str, enum.Enum):
+    SSO = "SSO"
+    EMAIL_PASSWORD = "EMAIL_PASSWORD"
+
+
+class ProjectType(str, enum.Enum):
+    COMMERCIAL = "COMMERCIAL"
+    INDUSTRIAL = "INDUSTRIAL"
+    INSTITUTIONAL = "INSTITUTIONAL"
+    RESIDENTIAL = "RESIDENTIAL"
+    INFRASTRUCTURE = "INFRASTRUCTURE"
+
+
+class ContractType(str, enum.Enum):
+    LUMP_SUM = "LUMP_SUM"
+    GMP = "GMP"
+    COST_PLUS = "COST_PLUS"
+    UNIT_PRICE = "UNIT_PRICE"
+    TIME_AND_MATERIAL = "TIME_AND_MATERIAL"
+
+
+class DocumentType(str, enum.Enum):
+    SPEC = "SPEC"
+    DRAWING = "DRAWING"
+    ADDENDUM = "ADDENDUM"
+    RFI = "RFI"
+    CONTRACT = "CONTRACT"
+    CHANGE = "CHANGE"
+    COMPLIANCE = "COMPLIANCE"
+    MEETING = "MEETING"
+    FINANCIAL = "FINANCIAL"
+    SCHEDULE = "SCHEDULE"
+    CLOSEOUT = "CLOSEOUT"
+    PORTFOLIO = "PORTFOLIO"
+
+
+class DocumentStatus(str, enum.Enum):
+    UPLOADING = "UPLOADING"
+    PROCESSING = "PROCESSING"
+    READY = "READY"
+    ERROR = "ERROR"
+
+
+class RFIStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    PENDING_GC = "PENDING_GC"
+    OPEN = "OPEN"
+    ANSWERED = "ANSWERED"
+    CLOSED = "CLOSED"
+    VOID = "VOID"
+
+
+class RFIPriority(str, enum.Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class ComplianceNoticeType(str, enum.Enum):
+    NOTICE_TO_PROCEED = "NOTICE_TO_PROCEED"
+    CHANGE_ORDER_NOTICE = "CHANGE_ORDER_NOTICE"
+    DELAY_NOTICE = "DELAY_NOTICE"
+    CLAIM_NOTICE = "CLAIM_NOTICE"
+    CURE_NOTICE = "CURE_NOTICE"
+    TERMINATION_NOTICE = "TERMINATION_NOTICE"
+    LIEN_NOTICE = "LIEN_NOTICE"
+    WARRANTY_NOTICE = "WARRANTY_NOTICE"
+
+
+class ComplianceNoticeStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    SENT = "SENT"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    EXPIRED = "EXPIRED"
+    VOID = "VOID"
+
+
+class HealthScorePosture(str, enum.Enum):
+    GREEN = "GREEN"
+    MONITOR = "MONITOR"
+    ESCALATE = "ESCALATE"
+    CRITICAL = "CRITICAL"
+
+
+class ChangeEventStatus(str, enum.Enum):
+    IDENTIFIED = "IDENTIFIED"
+    EVALUATING = "EVALUATING"
+    PCO_SUBMITTED = "PCO_SUBMITTED"
+    COR_APPROVED = "COR_APPROVED"
+    CO_EXECUTED = "CO_EXECUTED"
+    REJECTED = "REJECTED"
+    VOID = "VOID"
+
+
+class ChangeEventType(str, enum.Enum):
+    SCOPE_CHANGE = "SCOPE_CHANGE"
+    DESIGN_ERROR = "DESIGN_ERROR"
+    UNFORESEEN_CONDITION = "UNFORESEEN_CONDITION"
+    OWNER_DIRECTIVE = "OWNER_DIRECTIVE"
+    SCHEDULE_IMPACT = "SCHEDULE_IMPACT"
+    REGULATORY = "REGULATORY"
+
+
+class MeetingType(str, enum.Enum):
+    OAC = "OAC"
+    FOREMAN = "FOREMAN"
+    SAFETY = "SAFETY"
+    COORDINATION = "COORDINATION"
+    PRECONSTRUCTION = "PRECONSTRUCTION"
+    CLOSEOUT = "CLOSEOUT"
+
+
+class MeetingStatus(str, enum.Enum):
+    SCHEDULED = "SCHEDULED"
+    PREP_READY = "PREP_READY"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class TalkingPointPriority(str, enum.Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class ActionItemStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    OVERDUE = "OVERDUE"
+    CANCELLED = "CANCELLED"
+
+
+class CloseoutCategory(str, enum.Enum):
+    DOCUMENTATION = "DOCUMENTATION"
+    FINANCIAL = "FINANCIAL"
+    WARRANTY = "WARRANTY"
+    PUNCHLIST = "PUNCHLIST"
+    TRAINING = "TRAINING"
+    SPARE_PARTS = "SPARE_PARTS"
+    REGULATORY = "REGULATORY"
+
+
+class CloseoutItemStatus(str, enum.Enum):
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class RetentionConditionStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    MET = "MET"
+    WAIVED = "WAIVED"
+    DISPUTED = "DISPUTED"
+
+
+class NotificationType(str, enum.Enum):
+    COMPLIANCE_DEADLINE = "COMPLIANCE_DEADLINE"
+    RFI_RESPONSE_DUE = "RFI_RESPONSE_DUE"
+    RFI_OVERDUE = "RFI_OVERDUE"
+    ACTION_ITEM_DUE = "ACTION_ITEM_DUE"
+    HEALTH_SCORE_ALERT = "HEALTH_SCORE_ALERT"
+    CO_POTENTIAL_DETECTED = "CO_POTENTIAL_DETECTED"
+    DOCUMENT_PROCESSED = "DOCUMENT_PROCESSED"
+    MEETING_PREP_READY = "MEETING_PREP_READY"
+    VERSION_MISMATCH = "VERSION_MISMATCH"
+    CONFLICT_DETECTED = "CONFLICT_DETECTED"
+
+
+class NotificationSeverity(str, enum.Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
+class NotificationChannel(str, enum.Enum):
+    IN_APP = "IN_APP"
+    EMAIL = "EMAIL"
+    SLACK = "SLACK"
+
+
+class SearchScope(str, enum.Enum):
+    PROJECT = "PROJECT"
+    CROSS_PROJECT = "CROSS_PROJECT"
+    WORLD = "WORLD"
+
+
+class ContractClauseKind(str, enum.Enum):
+    PAYMENT_TERMS = "PAYMENT_TERMS"
+    CHANGE_ORDER_PROCESS = "CHANGE_ORDER_PROCESS"
+    CLAIMS_PROCEDURE = "CLAIMS_PROCEDURE"
+    DISPUTE_RESOLUTION = "DISPUTE_RESOLUTION"
+    NOTICE_REQUIREMENTS = "NOTICE_REQUIREMENTS"
+    RETENTION = "RETENTION"
+    WARRANTY = "WARRANTY"
+    INSURANCE = "INSURANCE"
+    INDEMNIFICATION = "INDEMNIFICATION"
+    TERMINATION = "TERMINATION"
+    FORCE_MAJEURE = "FORCE_MAJEURE"
+    LIQUIDATED_DAMAGES = "LIQUIDATED_DAMAGES"
+    SCHEDULE = "SCHEDULE"
+    SAFETY = "SAFETY"
+    GENERAL_CONDITIONS = "GENERAL_CONDITIONS"
+    SUPPLEMENTARY_CONDITIONS = "SUPPLEMENTARY_CONDITIONS"
+
+
+class ContractClauseMethod(str, enum.Enum):
+    WRITTEN_NOTICE = "WRITTEN_NOTICE"
+    CERTIFIED_MAIL = "CERTIFIED_MAIL"
+    EMAIL = "EMAIL"
+    HAND_DELIVERY = "HAND_DELIVERY"
+    REGISTERED_MAIL = "REGISTERED_MAIL"
+
+
+class DeadlineType(str, enum.Enum):
+    CALENDAR_DAYS = "CALENDAR_DAYS"
+    BUSINESS_DAYS = "BUSINESS_DAYS"
+    HOURS = "HOURS"
+
+
+class DeadlineStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    NOTICE_DRAFTED = "NOTICE_DRAFTED"
+    NOTICE_SENT = "NOTICE_SENT"
+    COMPLETED = "COMPLETED"
+    EXPIRED = "EXPIRED"
+    WAIVED = "WAIVED"
+
+
+class Severity(str, enum.Enum):
+    LOW = "LOW"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+    EXPIRED = "EXPIRED"
+
+
+class TriggerEventType(str, enum.Enum):
+    CHANGE_ORDER = "CHANGE_ORDER"
+    RFI = "RFI"
+    SCHEDULE_DELAY = "SCHEDULE_DELAY"
+    DISCOVERY = "DISCOVERY"
+    DIRECTIVE = "DIRECTIVE"
+    CLAIM = "CLAIM"
+    DEFECT = "DEFECT"
+    OTHER = "OTHER"
+
+
+class DeliveryMethod(str, enum.Enum):
+    EMAIL = "EMAIL"
+    CERTIFIED_MAIL = "CERTIFIED_MAIL"
+    REGISTERED_MAIL = "REGISTERED_MAIL"
+    HAND_DELIVERY = "HAND_DELIVERY"
+    FAX = "FAX"
+    COURIER = "COURIER"
